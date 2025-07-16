@@ -1,0 +1,52 @@
+{
+  "user_config": {
+    "username": "your_username",
+    "password": "your_password",
+    "phone": "13800138000",
+    "email": "user@example.com",
+    "auto_login": true,
+    "session_timeout": 3600
+  },
+  "platform_configs": {
+    "damai": {
+      "platform": "damai",
+      "base_url": "https://www.damai.cn",
+      "api_endpoints": {
+        "search": "/api/search",
+        "detail": "/api/detail",
+        "order": "/api/order",
+        "login": "/api/login",
+        "captcha": "/api/captcha"
+      },
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "Referer": "https://www.damai.cn/",
+        "Origin": "https://www.damai.cn"
+      },
+      "timeout": 30,
+      "max_retries": 3,
+      "rate_limit": 1.0
+    }
+  },
+  "ticket_requests": [
+    {
+      "event_id": "123456",
+      "platform": "damai",
+      "target_price": 580.0,
+      "seat_preference": ["A区", "B区"],
+      "quantity": 2,
+      "auto_confirm": true,
+      "retry_times": 3,
+      "retry_interval": 1.0
+    }
+  ],
+  "settings": {
+    "log_level": "INFO",
+    "log_dir": "logs",
+    "max_workers": 5,
+    "default_retry_times": 3,
+    "default_retry_interval": 1.0,
+    "auto_save_config": true,
+    "enable_notifications": true
+  }
+} 
