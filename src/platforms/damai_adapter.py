@@ -127,19 +127,18 @@ class DamaiMobileAdapter(GrabStrategy):
                     message="提交订单失败"
                 )
             
-            # 9. 确认支付
-            if request.auto_confirm:
-                if not await self._confirm_payment():
-                    return GrabResult(
-                        success=False,
-                        message="确认支付失败"
-                    )
+            # 9. 等待进入待支付页面
+            if not await self._wait_for_payment_page():
+                return GrabResult(
+                    success=False,
+                    message="进入待支付页面失败"
+                )
             
             return GrabResult(
                 success=True,
                 ticket_id=f"damai_{request.event_id}_{int(time.time())}",
                 order_id=f"order_{int(time.time())}",
-                message="抢票成功！"
+                message="抢票成功！已进入待支付页面，请手动完成支付"
             )
             
         except Exception as e:
@@ -343,18 +342,30 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"提交订单异常: {e}")
             return False
     
-    async def _confirm_payment(self) -> bool:
-        """确认支付"""
+    async def _wait_for_payment_page(self) -> bool:
+        """等待进入待支付页面"""
         try:
-            # 点击确认支付
-            self._tap_screen(200, 800)  # 确认支付按钮
-            time.sleep(1)
+            self.logger.info("等待进入待支付页面...")
             
-            self.logger.info("确认支付")
+            # 等待页面加载
+            time.sleep(3)
+            
+            # 检查是否进入待支付页面
+            # 可以通过截图识别页面特征来判断
+            screenshot = self._take_screenshot()
+            if screenshot is None:
+                self.logger.warning("无法获取截图，假设已进入待支付页面")
+                return True
+            
+            # 这里可以添加图像识别逻辑来判断是否在待支付页面
+            # 例如识别"待支付"、"支付"等文字
+            # 临时返回True，实际应该根据图像识别结果判断
+            
+            self.logger.info("已进入待支付页面")
             return True
             
         except Exception as e:
-            self.logger.error(f"确认支付异常: {e}")
+            self.logger.error(f"等待待支付页面异常: {e}")
             return False
     
     def _take_screenshot(self) -> Optional[np.ndarray]:

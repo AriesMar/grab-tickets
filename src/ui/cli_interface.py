@@ -354,7 +354,6 @@ class CLIInterface:
         
         retry_times = IntPrompt.ask("重试次数", default=3)
         retry_interval = FloatPrompt.ask("重试间隔(秒)", default=1.0)
-        auto_confirm = Confirm.ask("自动确认支付", default=True)
         
         request = TicketRequest(
             event_id=event_id,
@@ -363,8 +362,7 @@ class CLIInterface:
             seat_preference=seat_preference,
             quantity=quantity,
             retry_times=retry_times,
-            retry_interval=retry_interval,
-            auto_confirm=auto_confirm
+            retry_interval=retry_interval
         )
         
         if self.config_manager.add_ticket_request(request):

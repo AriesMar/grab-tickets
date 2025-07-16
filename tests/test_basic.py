@@ -9,7 +9,6 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-import pytest
 from src.data.models import TicketRequest, PlatformType, UserConfig
 from src.data.config_manager import ConfigManager
 from src.utils.logger import get_logger
@@ -24,13 +23,17 @@ class TestDataModels:
             event_id="123456",
             platform=PlatformType.DAMAI,
             target_price=580.0,
-            quantity=2
+            quantity=2,
+            retry_times=3,
+            retry_interval=1.0
         )
         
         assert request.event_id == "123456"
         assert request.platform == PlatformType.DAMAI
         assert request.target_price == 580.0
         assert request.quantity == 2
+        assert request.retry_times == 3
+        assert request.retry_interval == 1.0
     
     def test_user_config_creation(self):
         """测试用户配置创建"""

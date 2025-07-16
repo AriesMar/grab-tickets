@@ -49,7 +49,6 @@ class TicketRequest(BaseModel):
     target_price: Optional[float] = Field(default=None, description="目标价格")
     seat_preference: Optional[List[str]] = Field(default=None, description="座位偏好")
     quantity: int = Field(default=1, description="抢票数量")
-    auto_confirm: bool = Field(default=True, description="自动确认")
     retry_times: int = Field(default=3, description="重试次数")
     retry_interval: float = Field(default=1.0, description="重试间隔(秒)")
     
@@ -61,7 +60,6 @@ class TicketRequest(BaseModel):
                 "target_price": 580.0,
                 "seat_preference": ["A区", "B区"],
                 "quantity": 2,
-                "auto_confirm": True,
                 "retry_times": 3,
                 "retry_interval": 1.0
             }

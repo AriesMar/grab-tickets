@@ -35,7 +35,6 @@
       "target_price": 580.0,
       "seat_preference": ["A区", "B区"],
       "quantity": 2,
-      "auto_confirm": true,
       "retry_times": 3,
       "retry_interval": 1.0
     }
