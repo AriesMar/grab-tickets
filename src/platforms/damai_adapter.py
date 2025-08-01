@@ -224,6 +224,11 @@ class DamaiMobileAdapter(GrabStrategy):
             # 简单示例：检查是否存在"登录"按钮
             # 实际实现需要更复杂的图像识别算法
             
+            # 检查是否有安全验证
+            if self._detect_security_check(screenshot):
+                self.logger.warning("检测到安全验证，可能需要人工处理")
+                return False
+            
             # 临时返回True，实际应该根据图像识别结果判断
             self.logger.info("登录状态检查完成")
             return True
@@ -235,11 +240,23 @@ class DamaiMobileAdapter(GrabStrategy):
     async def _search_event(self, event_id: str) -> bool:
         """搜索活动"""
         try:
+            # 添加隐身延迟
+            self._add_stealth_delay()
+            
+            # 掩盖自动化信号
+            self._mask_automation_signals()
+            
             # 点击搜索按钮
             search_button_pos = self._find_element_by_text("搜索")
             if search_button_pos:
                 self._tap_screen(search_button_pos[0], search_button_pos[1])
                 time.sleep(1)
+            
+            # 添加隐身行为
+            self._add_stealth_behavior()
+            
+            # 模拟人性化行为
+            self._simulate_human_behavior()
             
             # 输入活动ID或关键词
             self._input_text(event_id)
@@ -444,4 +461,75 @@ class DamaiMobileAdapter(GrabStrategy):
         """根据偏好查找座位"""
         # 这里应该实现座位识别
         # 临时返回固定位置
-        return (300, 500) 
+        return (300, 500)
+    
+    def _detect_security_check(self, screenshot) -> bool:
+        """检测安全验证"""
+        try:
+            # 这里可以添加图像识别逻辑来检测安全验证
+            # 例如检测滑块验证、图片验证等
+            
+            # 临时返回False，实际应该根据图像识别结果判断
+            return False
+        except Exception as e:
+            self.logger.error(f"检测安全验证异常: {e}")
+            return False
+    
+    def _add_human_like_delay(self):
+        """添加人性化延迟"""
+        # 模拟人类操作的不规则延迟
+        delays = [0.5, 1.2, 0.8, 1.5, 0.3, 1.0]
+        delay = random.choice(delays)
+        
+        # 添加微小的随机变化
+        variation = random.uniform(-0.1, 0.1)
+        final_delay = max(0.1, delay + variation)
+        
+        time.sleep(final_delay)
+        self.logger.debug(f"添加人性化延迟: {final_delay:.3f}秒")
+    
+    def _add_stealth_delay(self):
+        """添加隐身延迟"""
+        # 更自然的延迟模式
+        base_delay = random.uniform(1.0, 3.0)
+        
+        # 添加随机变化
+        variation = random.uniform(-0.2, 0.2)
+        final_delay = max(0.5, base_delay + variation)
+        
+        time.sleep(final_delay)
+        self.logger.debug(f"添加隐身延迟: {final_delay:.3f}秒")
+    
+    def _simulate_human_behavior(self):
+        """模拟人类行为"""
+        # 随机添加一些人性化的操作
+        if random.random() < 0.1:  # 10%概率
+            # 模拟偶尔的误操作
+            self._tap_screen(random.randint(100, 400), random.randint(100, 400))
+            time.sleep(0.5)
+            self.logger.debug("模拟人性化操作")
+    
+    def _add_stealth_behavior(self):
+        """添加隐身行为"""
+        # 模拟更真实的人类行为模式
+        behaviors = [
+            lambda: self._tap_screen(random.randint(50, 350), random.randint(50, 350)),
+            lambda: time.sleep(random.uniform(0.2, 0.8)),
+            lambda: self._input_text(" "),  # 模拟输入空格
+            lambda: self._tap_screen(random.randint(200, 300), random.randint(200, 300))
+        ]
+        
+        # 随机选择行为
+        if random.random() < 0.15:  # 15%概率
+            behavior = random.choice(behaviors)
+            behavior()
+            self.logger.debug("添加隐身行为")
+    
+    def _mask_automation_signals(self):
+        """掩盖自动化信号"""
+        # 在关键操作前添加随机行为
+        if random.random() < 0.2:  # 20%概率
+            # 模拟用户思考时间
+            think_time = random.uniform(0.5, 2.0)
+            time.sleep(think_time)
+            self.logger.debug(f"模拟思考时间: {think_time:.2f}秒") 

@@ -9,6 +9,8 @@ from fake_useragent import UserAgent
 from loguru import logger
 
 from ..data.models import PlatformConfig
+from .security import SecurityManager, AntiDetectionManager, SecurityValidator
+from .advanced_anti_detection import StealthSession, PrivacyProtection
 
 
 class HttpClient:
@@ -18,29 +20,41 @@ class HttpClient:
         self.config = config
         self.session = requests.Session()
         self.ua = UserAgent()
+        self.security_manager = SecurityManager()
+        self.anti_detection = AntiDetectionManager()
+        self.security_validator = SecurityValidator()
+        self.stealth_session = StealthSession()
+        self.privacy_protection = PrivacyProtection()
         self._setup_session()
     
     def _setup_session(self):
         """设置会话配置"""
-        # 设置默认请求头
-        default_headers = {
-            "User-Agent": self.ua.random,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-        }
+        # 使用隐身会话管理器创建会话
+        self.session = self.stealth_session.create_stealth_session()
         
         # 合并配置中的请求头
-        default_headers.update(self.config.headers)
-        self.session.headers.update(default_headers)
+        self.session.headers.update(self.config.headers)
         
         # 设置超时
         self.session.timeout = self.config.timeout
+        
+        # 验证配置安全性
+        is_safe, errors = self.security_validator.validate_config(self.config.dict())
+        if not is_safe:
+            logger.warning(f"配置安全性问题: {errors}")
+        
+        # 清理敏感信息
+        self.config.headers = self.privacy_protection.sanitize_data(self.config.headers)
     
     def _rate_limit(self):
         """请求频率限制"""
+        # 检查频率限制
+        if not self.security_manager.check_rate_limit():
+            raise Exception("请求频率超限")
+        
+        # 添加随机延迟
+        self.security_manager.add_random_delay()
+        
         if hasattr(self, '_last_request_time'):
             elapsed = time.time() - self._last_request_time
             if elapsed < self.config.rate_limit:
@@ -50,21 +64,44 @@ class HttpClient:
     
     def _update_user_agent(self):
         """更新User-Agent"""
-        self.session.headers["User-Agent"] = self.ua.random
+        self.session.headers["User-Agent"] = self.security_manager.rotate_user_agent()
     
     def get(self, url: str, params: Optional[Dict[str, Any]] = None, 
             headers: Optional[Dict[str, str]] = None, **kwargs) -> requests.Response:
         """GET请求"""
         self._rate_limit()
-        self._update_user_agent()
+        
+        # 清理敏感参数
+        if params:
+            params = self.privacy_protection.sanitize_data(params)
+        if headers:
+            headers = self.privacy_protection.sanitize_data(headers)
+        
+        # 分析请求模式
+        request_data = {
+            "method": "GET",
+            "url": url,
+            "headers": headers or {},
+            "params": params or {}
+        }
+        self.anti_detection.analyze_request_pattern(request_data)
         
         try:
-            response = self.session.get(
-                url, 
-                params=params, 
-                headers=headers,
-                **kwargs
+            # 使用隐身请求
+            response = self.stealth_session.make_stealth_request(
+                self.session, "GET", url, 
+                params=params, headers=headers, **kwargs
             )
+            
+            # 验证响应安全性
+            if not self.security_manager.validate_response(response):
+                raise Exception("响应安全性验证失败")
+            
+            # 检测验证码
+            if self.security_manager.detect_captcha(response.text):
+                captcha_result = self.security_manager.handle_captcha(response)
+                logger.warning(f"检测到验证码: {captcha_result}")
+            
             response.raise_for_status()
             logger.debug(f"GET请求成功: {url}")
             return response

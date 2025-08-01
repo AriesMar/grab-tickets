@@ -1,0 +1,107 @@
+{
+  "privacy_protection": {
+    "enable_data_anonymization": true,
+    "enable_sensitive_data_encryption": true,
+    "enable_tracking_protection": true,
+    "enable_fingerprint_randomization": true,
+    "enable_session_rotation": true,
+    "enable_proxy_rotation": false,
+    "log_sanitization": true,
+    "data_retention_days": 7
+  },
+  "stealth_settings": {
+    "enable_stealth_mode": true,
+    "stealth_delay_min": 1.0,
+    "stealth_delay_max": 3.0,
+    "session_rotation_interval_min": 300,
+    "session_rotation_interval_max": 600,
+    "device_fingerprint_randomization": true,
+    "user_agent_rotation": true,
+    "ip_address_randomization": true
+  },
+  "tracking_protection": {
+    "block_analytics": true,
+    "block_advertising": true,
+    "block_social_media": true,
+    "block_fingerprinting": true,
+    "block_cookies": false,
+    "block_scripts": [
+      "google-analytics",
+      "facebook",
+      "twitter",
+      "linkedin",
+      "pinterest"
+    ]
+  },
+  "data_anonymization": {
+    "mask_emails": true,
+    "mask_phone_numbers": true,
+    "mask_credit_cards": true,
+    "mask_addresses": true,
+    "mask_names": true,
+    "mask_ips": true,
+    "mask_device_ids": true
+  },
+  "security_headers": {
+    "enable_dnt": true,
+    "enable_sec_fetch": true,
+    "enable_cache_control": true,
+    "enable_x_frame_options": true,
+    "enable_x_content_type_options": true,
+    "enable_referrer_policy": true
+  },
+  "behavior_simulation": {
+    "enable_human_like_delays": true,
+    "enable_random_actions": true,
+    "enable_typo_simulation": false,
+    "enable_mouse_movement": false,
+    "enable_scroll_simulation": false,
+    "human_delay_probability": 0.3,
+    "random_action_probability": 0.15
+  },
+  "session_management": {
+    "enable_session_rotation": true,
+    "enable_cookie_rotation": true,
+    "enable_header_rotation": true,
+    "enable_user_agent_rotation": true,
+    "max_session_duration": 3600,
+    "min_session_duration": 300
+  },
+  "fingerprint_protection": {
+    "randomize_canvas": true,
+    "randomize_webgl": true,
+    "randomize_audio": true,
+    "randomize_fonts": true,
+    "randomize_plugins": true,
+    "randomize_screen_resolution": true,
+    "randomize_timezone": true,
+    "randomize_language": true
+  },
+  "log_protection": {
+    "enable_log_encryption": false,
+    "enable_log_compression": true,
+    "enable_log_rotation": true,
+    "log_retention_days": 30,
+    "sensitive_data_masking": true,
+    "ip_address_masking": true,
+    "user_agent_masking": false
+  },
+  "network_protection": {
+    "enable_tls_fingerprinting": false,
+    "enable_tcp_fingerprinting": false,
+    "enable_dns_protection": false,
+    "enable_http2_simulation": true,
+    "enable_http3_simulation": false,
+    "randomize_connection_parameters": true
+  },
+  "automation_detection_evasion": {
+    "mask_webdriver": true,
+    "mask_selenium": true,
+    "mask_phantom": true,
+    "mask_headless": true,
+    "mask_automation": true,
+    "simulate_human_behavior": true,
+    "randomize_timing": true,
+    "add_noise_to_requests": true
+  }
+} 
