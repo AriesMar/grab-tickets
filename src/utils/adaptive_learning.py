@@ -1,1088 +1,755 @@
 #!/usr/bin/env python3
 """
-自适应学习系统
-实现在线学习、模式识别、策略适应等功能
+自适应学习模块 - 根据环境变化自动调整策略
 """
-
-import numpy as np
-import json
 import time
 import random
-from typing import Dict, List, Any, Optional, Tuple
+import json
+import numpy as np
+from typing import Dict, List, Any, Optional, Tuple, Callable
 from dataclasses import dataclass, asdict
 from enum import Enum
-import pickle
-import os
-from collections import deque
 import threading
-import queue
+from collections import deque
+from loguru import logger
 
 
 class LearningType(Enum):
     """学习类型"""
-    ONLINE_LEARNING = "online_learning"
-    PATTERN_RECOGNITION = "pattern_recognition"
-    STRATEGY_ADAPTATION = "strategy_adaptation"
-    PREDICTIVE_ANALYSIS = "predictive_analysis"
+    REINFORCEMENT = "reinforcement"
+    SUPERVISED = "supervised"
+    UNSUPERVISED = "unsupervised"
+    TRANSFER = "transfer"
+    META = "meta"
 
 
-@dataclass
-class DetectionPattern:
-    """检测模式"""
-    pattern_id: str
-    pattern_type: str
-    features: Dict[str, float]
-    confidence: float
-    timestamp: float
-    frequency: int
-    success_rate: float
+class EnvironmentType(Enum):
+    """环境类型"""
+    STABLE = "stable"
+    CHANGING = "changing"
+    ADVERSARIAL = "adversarial"
+    UNKNOWN = "unknown"
 
 
 @dataclass
 class LearningContext:
     """学习上下文"""
-    session_id: str
-    user_id: str
-    environment: Dict[str, Any]
-    current_strategy: str
+    environment_type: EnvironmentType
+    success_rate: float
+    detection_rate: float
     performance_metrics: Dict[str, float]
+    adaptation_needed: bool
     timestamp: float
 
 
-class OnlineLearner:
-    """在线学习器"""
+@dataclass
+class AdaptationStrategy:
+    """适应策略"""
+    strategy_id: str
+    strategy_type: str
+    parameters: Dict[str, Any]
+    success_rate: float
+    last_used: float
+    usage_count: int
+
+
+class AdaptiveLearningEngine:
+    """自适应学习引擎"""
     
-    def __init__(self, learning_rate: float = 0.01, memory_size: int = 10000):
-        self.learning_rate = learning_rate
-        self.memory = deque(maxlen=memory_size)
-        self.patterns = {}
-        self.weights = {}
-        self.performance_history = []
-        self.lock = threading.Lock()
+    def __init__(self, memory_size: int = 1000):
+        self.logger = logger.bind(name="adaptive_learning_engine")
+        self.memory_size = memory_size
+        self.experience_buffer = deque(maxlen=memory_size)
+        self.adaptation_strategies: Dict[str, AdaptationStrategy] = {}
+        self.current_environment = EnvironmentType.UNKNOWN
+        self.learning_rate = 0.1
+        self.exploration_rate = 0.3
+        self.performance_threshold = 0.8
         
-    def learn(self, detection_data: Dict[str, Any]) -> Dict[str, Any]:
-        """在线学习"""
+        # 初始化策略
+        self._initialize_strategies()
         
-        with self.lock:
-            # 提取特征
-            features = self._extract_features(detection_data)
+    def _initialize_strategies(self):
+        """初始化适应策略"""
+        strategies = [
+            AdaptationStrategy(
+                strategy_id="conservative",
+                strategy_type="defensive",
+                parameters={"risk_tolerance": 0.1, "adaptation_speed": 0.5},
+                success_rate=0.8,
+                last_used=time.time(),
+                usage_count=0
+            ),
+            AdaptationStrategy(
+                strategy_id="aggressive",
+                strategy_type="offensive",
+                parameters={"risk_tolerance": 0.8, "adaptation_speed": 0.9},
+                success_rate=0.7,
+                last_used=time.time(),
+                usage_count=0
+            ),
+            AdaptationStrategy(
+                strategy_id="balanced",
+                strategy_type="adaptive",
+                parameters={"risk_tolerance": 0.5, "adaptation_speed": 0.7},
+                success_rate=0.85,
+                last_used=time.time(),
+                usage_count=0
+            ),
+            AdaptationStrategy(
+                strategy_id="reactive",
+                strategy_type="responsive",
+                parameters={"risk_tolerance": 0.3, "adaptation_speed": 0.8},
+                success_rate=0.75,
+                last_used=time.time(),
+                usage_count=0
+            )
+        ]
+        
+        for strategy in strategies:
+            self.adaptation_strategies[strategy.strategy_id] = strategy
+    
+    def learn_from_experience(self, context: LearningContext) -> Dict[str, Any]:
+        """从经验中学习"""
+        
+        # 记录经验
+        self.experience_buffer.append(context)
+        
+        # 分析环境变化
+        environment_change = self._analyze_environment_change(context)
+        
+        # 选择适应策略
+        selected_strategy = self._select_adaptation_strategy(context, environment_change)
+        
+        # 应用策略
+        adaptation_result = self._apply_adaptation_strategy(selected_strategy, context)
+        
+        # 更新策略性能
+        self._update_strategy_performance(selected_strategy, context)
+        
+        # 学习新策略
+        new_strategies = self._learn_new_strategies(context)
+        
+        return {
+            "environment_change": environment_change,
+            "selected_strategy": selected_strategy.strategy_id,
+            "adaptation_result": adaptation_result,
+            "new_strategies": new_strategies,
+            "learning_progress": self._get_learning_progress()
+        }
+    
+    def _analyze_environment_change(self, context: LearningContext) -> Dict[str, Any]:
+        """分析环境变化"""
+        if len(self.experience_buffer) < 2:
+            return {"change_detected": False, "change_magnitude": 0.0}
+        
+        # 获取最近的上下文
+        recent_contexts = list(self.experience_buffer)[-10:]
+        
+        # 计算变化指标
+        success_rates = [ctx.success_rate for ctx in recent_contexts]
+        detection_rates = [ctx.detection_rate for ctx in recent_contexts]
+        
+        # 计算变化幅度
+        success_rate_change = np.std(success_rates) if len(success_rates) > 1 else 0.0
+        detection_rate_change = np.std(detection_rates) if len(detection_rates) > 1 else 0.0
+        
+        # 确定环境类型
+        total_change = success_rate_change + detection_rate_change
+        
+        if total_change < 0.1:
+            environment_type = EnvironmentType.STABLE
+        elif total_change < 0.3:
+            environment_type = EnvironmentType.CHANGING
+        else:
+            environment_type = EnvironmentType.ADVERSARIAL
+        
+        self.current_environment = environment_type
+        
+        return {
+            "change_detected": total_change > 0.05,
+            "change_magnitude": total_change,
+            "environment_type": environment_type.value,
+            "success_rate_volatility": success_rate_change,
+            "detection_rate_volatility": detection_rate_change
+        }
+    
+    def _select_adaptation_strategy(self, context: LearningContext, 
+                                  environment_change: Dict[str, Any]) -> AdaptationStrategy:
+        """选择适应策略"""
+        
+        # 根据环境类型和性能选择策略
+        available_strategies = []
+        
+        for strategy in self.adaptation_strategies.values():
+            # 计算策略适用性分数
+            applicability_score = self._calculate_strategy_applicability(
+                strategy, context, environment_change
+            )
             
-            # 更新模式库
-            pattern_id = self._update_patterns(features, detection_data)
+            available_strategies.append((strategy, applicability_score))
+        
+        # 按适用性分数排序
+        available_strategies.sort(key=lambda x: x[1], reverse=True)
+        
+        # 探索与利用平衡
+        if random.random() < self.exploration_rate:
+            # 探索：随机选择策略
+            selected_strategy = random.choice(available_strategies)[0]
+        else:
+            # 利用：选择最佳策略
+            selected_strategy = available_strategies[0][0]
+        
+        # 更新策略使用信息
+        selected_strategy.last_used = time.time()
+        selected_strategy.usage_count += 1
+        
+        return selected_strategy
+    
+    def _calculate_strategy_applicability(self, strategy: AdaptationStrategy, 
+                                        context: LearningContext,
+                                        environment_change: Dict[str, Any]) -> float:
+        """计算策略适用性分数"""
+        
+        base_score = strategy.success_rate
+        
+        # 环境匹配度
+        environment_match = 0.0
+        if environment_change["environment_type"] == "stable":
+            if strategy.strategy_type == "defensive":
+                environment_match = 0.8
+        elif environment_change["environment_type"] == "changing":
+            if strategy.strategy_type == "adaptive":
+                environment_match = 0.9
+        elif environment_change["environment_type"] == "adversarial":
+            if strategy.strategy_type == "responsive":
+                environment_match = 0.8
+        
+        # 性能匹配度
+        performance_match = 0.0
+        if context.success_rate < 0.5:
+            # 低成功率，需要激进策略
+            if strategy.parameters["risk_tolerance"] > 0.6:
+                performance_match = 0.8
+        elif context.success_rate > 0.8:
+            # 高成功率，可以保守
+            if strategy.parameters["risk_tolerance"] < 0.4:
+                performance_match = 0.8
+        
+        # 时间衰减
+        time_decay = max(0.1, 1.0 - (time.time() - strategy.last_used) / 3600)
+        
+        # 综合分数
+        total_score = (base_score * 0.4 + 
+                      environment_match * 0.3 + 
+                      performance_match * 0.2 + 
+                      time_decay * 0.1)
+        
+        return total_score
+    
+    def _apply_adaptation_strategy(self, strategy: AdaptationStrategy, 
+                                  context: LearningContext) -> Dict[str, Any]:
+        """应用适应策略"""
+        
+        result = {
+            "strategy_applied": strategy.strategy_id,
+            "parameters_used": strategy.parameters,
+            "adaptation_actions": [],
+            "expected_improvement": 0.0
+        }
+        
+        # 根据策略类型执行适应动作
+        if strategy.strategy_type == "defensive":
+            actions = self._apply_defensive_strategy(strategy, context)
+        elif strategy.strategy_type == "offensive":
+            actions = self._apply_offensive_strategy(strategy, context)
+        elif strategy.strategy_type == "adaptive":
+            actions = self._apply_adaptive_strategy(strategy, context)
+        elif strategy.strategy_type == "responsive":
+            actions = self._apply_responsive_strategy(strategy, context)
+        else:
+            actions = []
+        
+        result["adaptation_actions"] = actions
+        
+        # 计算预期改进
+        expected_improvement = self._calculate_expected_improvement(strategy, context)
+        result["expected_improvement"] = expected_improvement
+        
+        return result
+    
+    def _apply_defensive_strategy(self, strategy: AdaptationStrategy, 
+                                context: LearningContext) -> List[Dict[str, Any]]:
+        """应用防御策略"""
+        actions = []
+        
+        # 降低风险
+        if context.detection_rate > 0.3:
+            actions.append({
+                "action": "reduce_aggression",
+                "parameter": "risk_tolerance",
+                "value": strategy.parameters["risk_tolerance"] * 0.8
+            })
+        
+        # 增加隐蔽性
+        if context.success_rate < 0.7:
+            actions.append({
+                "action": "enhance_stealth",
+                "parameter": "stealth_level",
+                "value": 0.9
+            })
+        
+        # 降低速度
+        actions.append({
+            "action": "slow_down",
+            "parameter": "operation_speed",
+            "value": 0.6
+        })
+        
+        return actions
+    
+    def _apply_offensive_strategy(self, strategy: AdaptationStrategy, 
+                                context: LearningContext) -> List[Dict[str, Any]]:
+        """应用进攻策略"""
+        actions = []
+        
+        # 提高成功率
+        if context.success_rate < 0.8:
+            actions.append({
+                "action": "increase_aggression",
+                "parameter": "risk_tolerance",
+                "value": min(0.9, strategy.parameters["risk_tolerance"] * 1.2)
+            })
+        
+        # 加快速度
+        actions.append({
+            "action": "speed_up",
+            "parameter": "operation_speed",
+            "value": 1.2
+        })
+        
+        # 增加并发
+        actions.append({
+            "action": "increase_concurrency",
+            "parameter": "concurrent_operations",
+            "value": 3
+        })
+        
+        return actions
+    
+    def _apply_adaptive_strategy(self, strategy: AdaptationStrategy, 
+                               context: LearningContext) -> List[Dict[str, Any]]:
+        """应用自适应策略"""
+        actions = []
+        
+        # 动态调整参数
+        adaptation_speed = strategy.parameters["adaptation_speed"]
+        
+        if context.success_rate < 0.6:
+            # 性能差，增加适应性
+            actions.append({
+                "action": "increase_adaptation",
+                "parameter": "adaptation_speed",
+                "value": min(1.0, adaptation_speed * 1.3)
+            })
+        elif context.success_rate > 0.9:
+            # 性能好，减少变化
+            actions.append({
+                "action": "stabilize",
+                "parameter": "adaptation_speed",
+                "value": max(0.3, adaptation_speed * 0.8)
+            })
+        
+        # 平衡风险
+        actions.append({
+            "action": "balance_risk",
+            "parameter": "risk_tolerance",
+            "value": 0.5
+        })
+        
+        return actions
+    
+    def _apply_responsive_strategy(self, strategy: AdaptationStrategy, 
+                                 context: LearningContext) -> List[Dict[str, Any]]:
+        """应用响应策略"""
+        actions = []
+        
+        # 快速响应环境变化
+        if context.adaptation_needed:
+            actions.append({
+                "action": "quick_response",
+                "parameter": "response_time",
+                "value": 0.1
+            })
+        
+        # 动态调整检测率
+        if context.detection_rate > 0.5:
+            actions.append({
+                "action": "evade_detection",
+                "parameter": "evasion_level",
+                "value": 0.9
+            })
+        
+        # 优化性能
+        actions.append({
+            "action": "optimize_performance",
+            "parameter": "performance_target",
+            "value": 0.95
+        })
+        
+        return actions
+    
+    def _calculate_expected_improvement(self, strategy: AdaptationStrategy, 
+                                      context: LearningContext) -> float:
+        """计算预期改进"""
+        
+        base_improvement = 0.1
+        
+        # 根据策略类型调整
+        if strategy.strategy_type == "defensive":
+            if context.detection_rate > 0.3:
+                base_improvement += 0.2
+        elif strategy.strategy_type == "offensive":
+            if context.success_rate < 0.7:
+                base_improvement += 0.3
+        elif strategy.strategy_type == "adaptive":
+            base_improvement += 0.15
+        elif strategy.strategy_type == "responsive":
+            if context.adaptation_needed:
+                base_improvement += 0.25
+        
+        # 根据历史成功率调整
+        historical_improvement = strategy.success_rate - 0.5
+        base_improvement += historical_improvement * 0.5
+        
+        return min(1.0, max(0.0, base_improvement))
+    
+    def _update_strategy_performance(self, strategy: AdaptationStrategy, 
+                                   context: LearningContext):
+        """更新策略性能"""
+        
+        # 计算新的成功率
+        current_performance = context.success_rate
+        
+        # 使用指数移动平均更新成功率
+        alpha = 0.1  # 学习率
+        strategy.success_rate = (alpha * current_performance + 
+                               (1 - alpha) * strategy.success_rate)
+    
+    def _learn_new_strategies(self, context: LearningContext) -> List[Dict[str, Any]]:
+        """学习新策略"""
+        new_strategies = []
+        
+        # 检查是否需要学习新策略
+        if len(self.experience_buffer) > 50:
+            # 分析成功模式
+            successful_patterns = self._analyze_successful_patterns()
             
-            # 更新权重
-            self._update_weights(features, detection_data)
+            for pattern in successful_patterns:
+                if self._should_create_new_strategy(pattern):
+                    new_strategy = self._create_strategy_from_pattern(pattern)
+                    self.adaptation_strategies[new_strategy.strategy_id] = new_strategy
+                    new_strategies.append(asdict(new_strategy))
+        
+        return new_strategies
+    
+    def _analyze_successful_patterns(self) -> List[Dict[str, Any]]:
+        """分析成功模式"""
+        patterns = []
+        
+        # 获取成功的经验
+        successful_experiences = [
+            exp for exp in self.experience_buffer 
+            if exp.success_rate > 0.8
+        ]
+        
+        if len(successful_experiences) < 5:
+            return patterns
+        
+        # 分析模式
+        for i in range(len(successful_experiences) - 1):
+            exp1 = successful_experiences[i]
+            exp2 = successful_experiences[i + 1]
             
-            # 记录性能
-            self._record_performance(detection_data)
-            
-            # 生成学习结果
-            learning_result = {
-                "pattern_id": pattern_id,
-                "features": features,
-                "confidence": self._calculate_confidence(features),
-                "recommendations": self._generate_recommendations(features),
-                "learning_progress": self._get_learning_progress()
+            pattern = {
+                "environment_type": exp1.environment_type,
+                "success_rate": (exp1.success_rate + exp2.success_rate) / 2,
+                "detection_rate": (exp1.detection_rate + exp2.detection_rate) / 2,
+                "adaptation_speed": 0.7,
+                "risk_tolerance": 0.5
             }
             
-            return learning_result
+            patterns.append(pattern)
+        
+        return patterns
     
-    def _extract_features(self, detection_data: Dict[str, Any]) -> Dict[str, float]:
-        """提取特征"""
-        features = {}
+    def _should_create_new_strategy(self, pattern: Dict[str, Any]) -> bool:
+        """判断是否应该创建新策略"""
         
-        # 检测分数
-        features["detection_score"] = detection_data.get("detection_score", 0.0)
+        # 检查是否已有类似策略
+        for strategy in self.adaptation_strategies.values():
+            if (abs(strategy.parameters.get("risk_tolerance", 0.5) - pattern["risk_tolerance"]) < 0.1 and
+                abs(strategy.parameters.get("adaptation_speed", 0.7) - pattern["adaptation_speed"]) < 0.1):
+                return False
         
-        # 响应时间
-        features["response_time"] = detection_data.get("response_time", 0.0)
-        
-        # 成功率
-        features["success_rate"] = detection_data.get("success_rate", 0.0)
-        
-        # 错误率
-        features["error_rate"] = detection_data.get("error_rate", 0.0)
-        
-        # 自然度分数
-        features["naturalness_score"] = detection_data.get("naturalness_score", 0.0)
-        
-        # 会话持续时间
-        features["session_duration"] = detection_data.get("session_duration", 0.0)
-        
-        # 页面数量
-        features["page_count"] = detection_data.get("page_count", 0.0)
-        
-        # 交互次数
-        features["interaction_count"] = detection_data.get("interaction_count", 0.0)
-        
-        # 时间因子
-        features["time_of_day"] = detection_data.get("time_of_day", 0.0)
-        
-        # 用户类型因子
-        features["user_type_factor"] = detection_data.get("user_type_factor", 1.0)
-        
-        return features
+        # 检查模式是否足够好
+        return pattern["success_rate"] > 0.8 and pattern["detection_rate"] < 0.3
     
-    def _update_patterns(self, features: Dict[str, float], 
-                        detection_data: Dict[str, Any]) -> str:
-        """更新模式库"""
+    def _create_strategy_from_pattern(self, pattern: Dict[str, Any]) -> AdaptationStrategy:
+        """从模式创建策略"""
         
-        # 计算特征哈希
-        feature_hash = self._hash_features(features)
+        strategy_id = f"learned_{int(time.time())}"
         
-        if feature_hash in self.patterns:
-            # 更新现有模式
-            pattern = self.patterns[feature_hash]
-            pattern.frequency += 1
-            pattern.timestamp = time.time()
-            pattern.success_rate = self._update_success_rate(
-                pattern.success_rate, detection_data.get("success", False)
-            )
-        else:
-            # 创建新模式
-            pattern = DetectionPattern(
-                pattern_id=feature_hash,
-                pattern_type=self._classify_pattern(features),
-                features=features.copy(),
-                confidence=self._calculate_confidence(features),
-                timestamp=time.time(),
-                frequency=1,
-                success_rate=1.0 if detection_data.get("success", False) else 0.0
-            )
-            self.patterns[feature_hash] = pattern
-        
-        return feature_hash
-    
-    def _hash_features(self, features: Dict[str, float]) -> str:
-        """计算特征哈希"""
-        # 简化的哈希算法
-        feature_str = "|".join([f"{k}:{v:.3f}" for k, v in sorted(features.items())])
-        return str(hash(feature_str))
-    
-    def _classify_pattern(self, features: Dict[str, float]) -> str:
-        """分类模式"""
-        detection_score = features.get("detection_score", 0.0)
-        success_rate = features.get("success_rate", 0.0)
-        
-        if detection_score < 0.1 and success_rate > 0.9:
-            return "high_success"
-        elif detection_score < 0.3 and success_rate > 0.7:
-            return "good_performance"
-        elif detection_score < 0.5 and success_rate > 0.5:
-            return "moderate_performance"
-        else:
-            return "needs_improvement"
-    
-    def _update_weights(self, features: Dict[str, float], 
-                       detection_data: Dict[str, Any]) -> None:
-        """更新权重"""
-        
-        # 计算目标值
-        target = 1.0 if detection_data.get("success", False) else 0.0
-        
-        # 更新每个特征的权重
-        for feature_name, feature_value in features.items():
-            if feature_name not in self.weights:
-                self.weights[feature_name] = 0.0
-            
-            # 简单的梯度下降更新
-            prediction = self._predict_feature(feature_name, feature_value)
-            error = target - prediction
-            self.weights[feature_name] += self.learning_rate * error * feature_value
-    
-    def _predict_feature(self, feature_name: str, feature_value: float) -> float:
-        """预测特征值"""
-        weight = self.weights.get(feature_name, 0.0)
-        return 1.0 / (1.0 + np.exp(-weight * feature_value))
-    
-    def _calculate_confidence(self, features: Dict[str, float]) -> float:
-        """计算置信度"""
-        # 基于特征权重和模式匹配计算置信度
-        confidence = 0.0
-        
-        for feature_name, feature_value in features.items():
-            weight = self.weights.get(feature_name, 0.0)
-            confidence += abs(weight * feature_value)
-        
-        # 归一化到0-1范围
-        return min(1.0, confidence / len(features))
-    
-    def _generate_recommendations(self, features: Dict[str, float]) -> List[str]:
-        """生成建议"""
-        recommendations = []
-        
-        detection_score = features.get("detection_score", 0.0)
-        success_rate = features.get("success_rate", 0.0)
-        naturalness_score = features.get("naturalness_score", 0.0)
-        
-        if detection_score > 0.5:
-            recommendations.append("检测分数过高，建议增加反检测措施")
-        
-        if success_rate < 0.7:
-            recommendations.append("成功率较低，建议优化策略")
-        
-        if naturalness_score < 0.8:
-            recommendations.append("自然度不足，建议改进行为模拟")
-        
-        if not recommendations:
-            recommendations.append("当前表现良好，继续保持")
-        
-        return recommendations
+        return AdaptationStrategy(
+            strategy_id=strategy_id,
+            strategy_type="learned",
+            parameters={
+                "risk_tolerance": pattern["risk_tolerance"],
+                "adaptation_speed": pattern["adaptation_speed"],
+                "environment_type": pattern["environment_type"].value
+            },
+            success_rate=pattern["success_rate"],
+            last_used=time.time(),
+            usage_count=0
+        )
     
     def _get_learning_progress(self) -> Dict[str, Any]:
         """获取学习进度"""
         return {
-            "total_patterns": len(self.patterns),
-            "total_samples": len(self.memory),
-            "average_confidence": np.mean([p.confidence for p in self.patterns.values()]) if self.patterns else 0.0,
-            "success_rate": np.mean([p.success_rate for p in self.patterns.values()]) if self.patterns else 0.0
+            "total_experiences": len(self.experience_buffer),
+            "current_environment": self.current_environment.value,
+            "total_strategies": len(self.adaptation_strategies),
+            "average_success_rate": np.mean([exp.success_rate for exp in self.experience_buffer]) if self.experience_buffer else 0.0,
+            "learning_rate": self.learning_rate,
+            "exploration_rate": self.exploration_rate
         }
-    
-    def _record_performance(self, detection_data: Dict[str, Any]) -> None:
-        """记录性能"""
-        performance = {
-            "timestamp": time.time(),
-            "detection_score": detection_data.get("detection_score", 0.0),
-            "success_rate": detection_data.get("success_rate", 0.0),
-            "response_time": detection_data.get("response_time", 0.0)
-        }
-        self.performance_history.append(performance)
-        
-        # 保持历史记录在合理范围内
-        if len(self.performance_history) > 1000:
-            self.performance_history = self.performance_history[-500:]
-    
-    def _update_success_rate(self, current_rate: float, success: bool) -> float:
-        """更新成功率"""
-        alpha = 0.1  # 学习率
-        return current_rate * (1 - alpha) + (1.0 if success else 0.0) * alpha
 
 
-class PatternRecognizer:
-    """模式识别器"""
+class MetaLearningOptimizer:
+    """元学习优化器"""
     
     def __init__(self):
-        self.patterns = {}
-        self.clusters = {}
-        self.similarity_threshold = 0.8
-        
-    def recognize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """识别模式"""
-        
-        # 提取特征
-        features = self._extract_pattern_features(data)
-        
-        # 查找相似模式
-        similar_patterns = self._find_similar_patterns(features)
-        
-        # 分类模式
-        pattern_class = self._classify_pattern(features)
-        
-        # 计算模式强度
-        pattern_strength = self._calculate_pattern_strength(features)
-        
-        return {
-            "pattern_class": pattern_class,
-            "similar_patterns": similar_patterns,
-            "pattern_strength": pattern_strength,
-            "confidence": self._calculate_recognition_confidence(features),
-            "features": features
+        self.logger = logger.bind(name="meta_learning_optimizer")
+        self.task_performance = {}
+        self.transfer_learning_data = {}
+        self.meta_parameters = {
+            "learning_rate": 0.01,
+            "meta_batch_size": 5,
+            "adaptation_steps": 3
         }
     
-    def _extract_pattern_features(self, data: Dict[str, Any]) -> Dict[str, float]:
-        """提取模式特征"""
-        features = {}
+    def optimize_meta_learning(self, task_id: str, performance_data: Dict[str, Any]) -> Dict[str, Any]:
+        """优化元学习"""
         
-        # 时间模式
-        features["time_pattern"] = self._extract_time_pattern(data)
+        # 记录任务性能
+        self.task_performance[task_id] = performance_data
         
-        # 行为模式
-        features["behavior_pattern"] = self._extract_behavior_pattern(data)
+        # 分析任务相似性
+        similar_tasks = self._find_similar_tasks(task_id)
         
-        # 检测模式
-        features["detection_pattern"] = self._extract_detection_pattern(data)
+        # 应用迁移学习
+        transfer_result = self._apply_transfer_learning(task_id, similar_tasks)
         
-        # 性能模式
-        features["performance_pattern"] = self._extract_performance_pattern(data)
+        # 更新元参数
+        meta_update = self._update_meta_parameters(task_id, performance_data)
         
-        return features
+        return {
+            "similar_tasks": similar_tasks,
+            "transfer_result": transfer_result,
+            "meta_update": meta_update,
+            "optimization_applied": True
+        }
     
-    def _extract_time_pattern(self, data: Dict[str, Any]) -> float:
-        """提取时间模式"""
-        time_of_day = data.get("time_of_day", 0.0)
-        session_duration = data.get("session_duration", 0.0)
+    def _find_similar_tasks(self, task_id: str) -> List[str]:
+        """查找相似任务"""
+        similar_tasks = []
         
-        # 时间模式特征
-        return (time_of_day * 24 + session_duration / 3600) / 25.0
-    
-    def _extract_behavior_pattern(self, data: Dict[str, Any]) -> float:
-        """提取行为模式"""
-        interaction_count = data.get("interaction_count", 0.0)
-        page_count = data.get("page_count", 0.0)
+        current_task = self.task_performance.get(task_id, {})
+        if not current_task:
+            return similar_tasks
         
-        # 行为模式特征
-        return (interaction_count + page_count) / 100.0
-    
-    def _extract_detection_pattern(self, data: Dict[str, Any]) -> float:
-        """提取检测模式"""
-        detection_score = data.get("detection_score", 0.0)
-        success_rate = data.get("success_rate", 0.0)
-        
-        # 检测模式特征
-        return (1.0 - detection_score) * success_rate
-    
-    def _extract_performance_pattern(self, data: Dict[str, Any]) -> float:
-        """提取性能模式"""
-        response_time = data.get("response_time", 0.0)
-        error_rate = data.get("error_rate", 0.0)
-        
-        # 性能模式特征
-        return (1.0 - error_rate) / (1.0 + response_time)
-    
-    def _find_similar_patterns(self, features: Dict[str, float]) -> List[Dict[str, Any]]:
-        """查找相似模式"""
-        similar_patterns = []
-        
-        for pattern_id, pattern in self.patterns.items():
-            similarity = self._calculate_similarity(features, pattern.features)
+        for other_task_id, other_task in self.task_performance.items():
+            if other_task_id == task_id:
+                continue
             
-            if similarity >= self.similarity_threshold:
-                similar_patterns.append({
-                    "pattern_id": pattern_id,
-                    "similarity": similarity,
-                    "pattern_type": pattern.pattern_type,
-                    "success_rate": pattern.success_rate
-                })
+            # 计算相似度
+            similarity = self._calculate_task_similarity(current_task, other_task)
+            
+            if similarity > 0.7:
+                similar_tasks.append(other_task_id)
         
-        # 按相似度排序
-        similar_patterns.sort(key=lambda x: x["similarity"], reverse=True)
-        
-        return similar_patterns[:5]  # 返回前5个最相似的
+        return similar_tasks
     
-    def _calculate_similarity(self, features1: Dict[str, float], 
-                            features2: Dict[str, float]) -> float:
-        """计算相似度"""
+    def _calculate_task_similarity(self, task1: Dict[str, Any], task2: Dict[str, Any]) -> float:
+        """计算任务相似度"""
+        
+        # 提取特征
+        features1 = self._extract_task_features(task1)
+        features2 = self._extract_task_features(task2)
+        
         if not features1 or not features2:
             return 0.0
         
         # 计算余弦相似度
-        keys = set(features1.keys()) & set(features2.keys())
-        if not keys:
+        dot_product = sum(f1 * f2 for f1, f2 in zip(features1, features2))
+        norm1 = sum(f1 * f1 for f1 in features1) ** 0.5
+        norm2 = sum(f2 * f2 for f2 in features2) ** 0.5
+        
+        if norm1 == 0 or norm2 == 0:
             return 0.0
         
-        numerator = sum(features1[k] * features2[k] for k in keys)
-        denominator1 = sum(features1[k] ** 2 for k in keys) ** 0.5
-        denominator2 = sum(features2[k] ** 2 for k in keys) ** 0.5
-        
-        if denominator1 == 0 or denominator2 == 0:
-            return 0.0
-        
-        return numerator / (denominator1 * denominator2)
+        return dot_product / (norm1 * norm2)
     
-    def _classify_pattern(self, features: Dict[str, float]) -> str:
-        """分类模式"""
-        # 基于特征值进行分类
-        time_pattern = features.get("time_pattern", 0.0)
-        behavior_pattern = features.get("behavior_pattern", 0.0)
-        detection_pattern = features.get("detection_pattern", 0.0)
-        performance_pattern = features.get("performance_pattern", 0.0)
+    def _extract_task_features(self, task: Dict[str, Any]) -> List[float]:
+        """提取任务特征"""
+        features = []
         
-        # 计算综合分数
-        score = (time_pattern + behavior_pattern + detection_pattern + performance_pattern) / 4.0
+        # 性能特征
+        features.extend([
+            task.get("success_rate", 0.5),
+            task.get("detection_rate", 0.5),
+            task.get("response_time", 1.0),
+            task.get("adaptation_speed", 0.7)
+        ])
         
-        if score > 0.8:
-            return "excellent"
-        elif score > 0.6:
-            return "good"
-        elif score > 0.4:
-            return "moderate"
+        # 环境特征
+        environment_type = task.get("environment_type", "unknown")
+        if environment_type == "stable":
+            features.extend([1, 0, 0])
+        elif environment_type == "changing":
+            features.extend([0, 1, 0])
+        elif environment_type == "adversarial":
+            features.extend([0, 0, 1])
         else:
-            return "poor"
+            features.extend([0, 0, 0])
+        
+        return features
     
-    def _calculate_pattern_strength(self, features: Dict[str, float]) -> float:
-        """计算模式强度"""
-        # 基于特征值的方差计算模式强度
-        values = list(features.values())
-        if not values:
-            return 0.0
+    def _apply_transfer_learning(self, task_id: str, similar_tasks: List[str]) -> Dict[str, Any]:
+        """应用迁移学习"""
         
-        mean_value = np.mean(values)
-        variance = np.var(values)
+        if not similar_tasks:
+            return {"success": False, "reason": "no_similar_tasks"}
         
-        # 强度 = 均值 * (1 - 方差)
-        return mean_value * (1.0 - min(1.0, variance))
-    
-    def _calculate_recognition_confidence(self, features: Dict[str, float]) -> float:
-        """计算识别置信度"""
-        # 基于特征数量和模式强度计算置信度
-        feature_count = len(features)
-        pattern_strength = self._calculate_pattern_strength(features)
+        # 收集相似任务的知识
+        transferred_knowledge = []
         
-        # 置信度 = 特征数量 * 模式强度 / 最大特征数
-        max_features = 10  # 假设最大特征数
-        return min(1.0, (feature_count * pattern_strength) / max_features)
-
-
-class StrategyAdapter:
-    """策略适配器"""
-    
-    def __init__(self):
-        self.strategies = self._load_strategies()
-        self.adaptation_history = []
-        self.current_strategy = "default"
-        
-    def _load_strategies(self) -> Dict[str, Dict[str, Any]]:
-        """加载策略库"""
-        return {
-            "aggressive": {
-                "description": "激进策略，快速响应",
-                "parameters": {
-                    "response_delay": 0.1,
-                    "retry_count": 5,
-                    "timeout": 10.0,
-                    "concurrent_requests": 10
-                }
-            },
-            "conservative": {
-                "description": "保守策略，稳定可靠",
-                "parameters": {
-                    "response_delay": 2.0,
-                    "retry_count": 2,
-                    "timeout": 30.0,
-                    "concurrent_requests": 3
-                }
-            },
-            "balanced": {
-                "description": "平衡策略，兼顾速度和稳定性",
-                "parameters": {
-                    "response_delay": 1.0,
-                    "retry_count": 3,
-                    "timeout": 20.0,
-                    "concurrent_requests": 5
-                }
-            },
-            "stealth": {
-                "description": "隐身策略，最大程度避免检测",
-                "parameters": {
-                    "response_delay": 3.0,
-                    "retry_count": 1,
-                    "timeout": 60.0,
-                    "concurrent_requests": 1
-                }
-            }
-        }
-    
-    def adapt(self, new_pattern: Dict[str, Any]) -> Dict[str, Any]:
-        """适配策略"""
-        
-        # 分析新模式
-        pattern_analysis = self._analyze_pattern(new_pattern)
-        
-        # 选择最佳策略
-        best_strategy = self._select_best_strategy(pattern_analysis)
-        
-        # 调整策略参数
-        adapted_parameters = self._adapt_parameters(best_strategy, pattern_analysis)
-        
-        # 记录适配历史
-        adaptation_record = {
-            "timestamp": time.time(),
-            "old_strategy": self.current_strategy,
-            "new_strategy": best_strategy,
-            "pattern_analysis": pattern_analysis,
-            "adapted_parameters": adapted_parameters
-        }
-        self.adaptation_history.append(adaptation_record)
-        
-        # 更新当前策略
-        self.current_strategy = best_strategy
-        
-        return {
-            "strategy": best_strategy,
-            "parameters": adapted_parameters,
-            "confidence": self._calculate_adaptation_confidence(pattern_analysis),
-            "reasoning": self._generate_adaptation_reasoning(pattern_analysis)
-        }
-    
-    def _analyze_pattern(self, pattern: Dict[str, Any]) -> Dict[str, Any]:
-        """分析模式"""
-        analysis = {}
-        
-        # 分析检测模式
-        detection_score = pattern.get("detection_score", 0.0)
-        success_rate = pattern.get("success_rate", 0.0)
-        
-        if detection_score > 0.7:
-            analysis["detection_level"] = "high"
-            analysis["recommended_action"] = "stealth"
-        elif detection_score > 0.4:
-            analysis["detection_level"] = "medium"
-            analysis["recommended_action"] = "balanced"
-        else:
-            analysis["detection_level"] = "low"
-            analysis["recommended_action"] = "aggressive"
-        
-        # 分析性能模式
-        response_time = pattern.get("response_time", 0.0)
-        if response_time > 30.0:
-            analysis["performance_level"] = "slow"
-            analysis["speed_recommendation"] = "increase_speed"
-        elif response_time < 5.0:
-            analysis["performance_level"] = "fast"
-            analysis["speed_recommendation"] = "maintain_speed"
-        else:
-            analysis["performance_level"] = "normal"
-            analysis["speed_recommendation"] = "optimize"
-        
-        # 分析成功率
-        if success_rate < 0.5:
-            analysis["success_level"] = "poor"
-            analysis["success_recommendation"] = "improve_reliability"
-        elif success_rate < 0.8:
-            analysis["success_level"] = "moderate"
-            analysis["success_recommendation"] = "enhance_stability"
-        else:
-            analysis["success_level"] = "good"
-            analysis["success_recommendation"] = "maintain"
-        
-        return analysis
-    
-    def _select_best_strategy(self, analysis: Dict[str, Any]) -> str:
-        """选择最佳策略"""
-        
-        detection_level = analysis.get("detection_level", "low")
-        success_level = analysis.get("success_level", "good")
-        performance_level = analysis.get("performance_level", "normal")
-        
-        # 基于检测水平选择策略
-        if detection_level == "high":
-            return "stealth"
-        elif detection_level == "medium":
-            return "balanced"
-        else:
-            # 基于成功率和性能选择策略
-            if success_level == "poor":
-                return "conservative"
-            elif performance_level == "slow":
-                return "aggressive"
-            else:
-                return "balanced"
-    
-    def _adapt_parameters(self, strategy: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """调整策略参数"""
-        
-        base_parameters = self.strategies[strategy]["parameters"].copy()
-        
-        # 根据分析结果调整参数
-        detection_level = analysis.get("detection_level", "low")
-        success_level = analysis.get("success_level", "good")
-        performance_level = analysis.get("performance_level", "normal")
-        
-        # 检测水平调整
-        if detection_level == "high":
-            base_parameters["response_delay"] *= 1.5
-            base_parameters["concurrent_requests"] = max(1, base_parameters["concurrent_requests"] // 2)
-        
-        # 成功率调整
-        if success_level == "poor":
-            base_parameters["retry_count"] += 2
-            base_parameters["timeout"] *= 1.5
-        
-        # 性能调整
-        if performance_level == "slow":
-            base_parameters["response_delay"] *= 0.8
-            base_parameters["timeout"] *= 0.8
-        
-        return base_parameters
-    
-    def _calculate_adaptation_confidence(self, analysis: Dict[str, Any]) -> float:
-        """计算适配置信度"""
-        # 基于分析结果的确定性计算置信度
-        confidence_factors = []
-        
-        # 检测水平确定性
-        detection_level = analysis.get("detection_level", "low")
-        if detection_level in ["high", "low"]:
-            confidence_factors.append(0.9)
-        else:
-            confidence_factors.append(0.7)
-        
-        # 成功率确定性
-        success_level = analysis.get("success_level", "good")
-        if success_level in ["poor", "good"]:
-            confidence_factors.append(0.9)
-        else:
-            confidence_factors.append(0.7)
-        
-        # 性能水平确定性
-        performance_level = analysis.get("performance_level", "normal")
-        if performance_level in ["slow", "fast"]:
-            confidence_factors.append(0.9)
-        else:
-            confidence_factors.append(0.7)
-        
-        return np.mean(confidence_factors) if confidence_factors else 0.7
-    
-    def _generate_adaptation_reasoning(self, analysis: Dict[str, Any]) -> str:
-        """生成适配推理"""
-        reasoning_parts = []
-        
-        detection_level = analysis.get("detection_level", "low")
-        if detection_level == "high":
-            reasoning_parts.append("检测水平高，采用隐身策略")
-        elif detection_level == "medium":
-            reasoning_parts.append("检测水平中等，采用平衡策略")
-        else:
-            reasoning_parts.append("检测水平低，可采用激进策略")
-        
-        success_level = analysis.get("success_level", "good")
-        if success_level == "poor":
-            reasoning_parts.append("成功率低，增加重试次数")
-        
-        performance_level = analysis.get("performance_level", "normal")
-        if performance_level == "slow":
-            reasoning_parts.append("性能较慢，优化响应时间")
-        
-        return "；".join(reasoning_parts)
-
-
-class DynamicKnowledgeBase:
-    """动态知识库"""
-    
-    def __init__(self, storage_path: str = "knowledge_base.pkl"):
-        self.storage_path = storage_path
-        self.knowledge = self._load_knowledge()
-        self.update_queue = queue.Queue()
-        self.update_thread = threading.Thread(target=self._update_worker, daemon=True)
-        self.update_thread.start()
-    
-    def _load_knowledge(self) -> Dict[str, Any]:
-        """加载知识库"""
-        try:
-            if os.path.exists(self.storage_path):
-                with open(self.storage_path, 'rb') as f:
-                    return pickle.load(f)
-        except Exception as e:
-            print(f"加载知识库失败: {e}")
-        
-        return {
-            "patterns": {},
-            "strategies": {},
-            "rules": {},
-            "statistics": {},
-            "last_update": time.time()
-        }
-    
-    def _save_knowledge(self) -> None:
-        """保存知识库"""
-        try:
-            with open(self.storage_path, 'wb') as f:
-                pickle.dump(self.knowledge, f)
-        except Exception as e:
-            print(f"保存知识库失败: {e}")
-    
-    def update(self, data: Dict[str, Any]) -> None:
-        """更新知识库"""
-        self.update_queue.put(data)
-    
-    def _update_worker(self) -> None:
-        """更新工作线程"""
-        while True:
-            try:
-                data = self.update_queue.get(timeout=1.0)
-                self._process_update(data)
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"更新知识库时出错: {e}")
-    
-    def _process_update(self, data: Dict[str, Any]) -> None:
-        """处理更新"""
-        update_type = data.get("type", "unknown")
-        
-        if update_type == "pattern":
-            self._update_patterns(data)
-        elif update_type == "strategy":
-            self._update_strategies(data)
-        elif update_type == "rule":
-            self._update_rules(data)
-        elif update_type == "statistics":
-            self._update_statistics(data)
-        
-        # 定期保存
-        if time.time() - self.knowledge.get("last_update", 0) > 300:  # 5分钟
-            self._save_knowledge()
-            self.knowledge["last_update"] = time.time()
-    
-    def _update_patterns(self, data: Dict[str, Any]) -> None:
-        """更新模式"""
-        pattern_id = data.get("pattern_id")
-        if pattern_id:
-            self.knowledge["patterns"][pattern_id] = data
-    
-    def _update_strategies(self, data: Dict[str, Any]) -> None:
-        """更新策略"""
-        strategy_name = data.get("strategy_name")
-        if strategy_name:
-            self.knowledge["strategies"][strategy_name] = data
-    
-    def _update_rules(self, data: Dict[str, Any]) -> None:
-        """更新规则"""
-        rule_id = data.get("rule_id")
-        if rule_id:
-            self.knowledge["rules"][rule_id] = data
-    
-    def _update_statistics(self, data: Dict[str, Any]) -> None:
-        """更新统计信息"""
-        stat_key = data.get("stat_key")
-        if stat_key:
-            self.knowledge["statistics"][stat_key] = data
-    
-    def query(self, query_type: str, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """查询知识库"""
-        if query_type == "pattern":
-            return self._query_patterns(query_data)
-        elif query_type == "strategy":
-            return self._query_strategies(query_data)
-        elif query_type == "rule":
-            return self._query_rules(query_data)
-        elif query_type == "statistics":
-            return self._query_statistics(query_data)
-        else:
-            return {"error": f"不支持的查询类型: {query_type}"}
-    
-    def _query_patterns(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """查询模式"""
-        pattern_type = query_data.get("pattern_type")
-        if pattern_type:
-            matching_patterns = {
-                k: v for k, v in self.knowledge["patterns"].items()
-                if v.get("pattern_type") == pattern_type
-            }
-            return {"patterns": matching_patterns}
-        return {"patterns": self.knowledge["patterns"]}
-    
-    def _query_strategies(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """查询策略"""
-        strategy_name = query_data.get("strategy_name")
-        if strategy_name:
-            return {"strategy": self.knowledge["strategies"].get(strategy_name)}
-        return {"strategies": self.knowledge["strategies"]}
-    
-    def _query_rules(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """查询规则"""
-        rule_type = query_data.get("rule_type")
-        if rule_type:
-            matching_rules = {
-                k: v for k, v in self.knowledge["rules"].items()
-                if v.get("rule_type") == rule_type
-            }
-            return {"rules": matching_rules}
-        return {"rules": self.knowledge["rules"]}
-    
-    def _query_statistics(self, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """查询统计信息"""
-        stat_key = query_data.get("stat_key")
-        if stat_key:
-            return {"statistics": self.knowledge["statistics"].get(stat_key)}
-        return {"statistics": self.knowledge["statistics"]}
-
-
-class PredictiveAnalyzer:
-    """预测分析器"""
-    
-    def __init__(self):
-        self.historical_data = []
-        self.prediction_models = {}
-        self.forecast_window = 24  # 小时
-        
-    def predict(self, current_data: Dict[str, Any]) -> Dict[str, Any]:
-        """进行预测"""
-        
-        # 更新历史数据
-        self._update_historical_data(current_data)
-        
-        # 生成各种预测
-        predictions = {
-            "detection_trend": self._predict_detection_trend(),
-            "performance_forecast": self._predict_performance_forecast(),
-            "success_probability": self._predict_success_probability(),
-            "optimal_timing": self._predict_optimal_timing(),
-            "risk_assessment": self._predict_risk_assessment()
-        }
-        
-        return predictions
-    
-    def _update_historical_data(self, data: Dict[str, Any]) -> None:
-        """更新历史数据"""
-        timestamp = time.time()
-        data_with_timestamp = {**data, "timestamp": timestamp}
-        self.historical_data.append(data_with_timestamp)
-        
-        # 保持历史数据在合理范围内
-        if len(self.historical_data) > 1000:
-            self.historical_data = self.historical_data[-500:]
-    
-    def _predict_detection_trend(self) -> Dict[str, Any]:
-        """预测检测趋势"""
-        if len(self.historical_data) < 10:
-            return {"trend": "insufficient_data", "confidence": 0.0}
-        
-        # 提取检测分数
-        detection_scores = [d.get("detection_score", 0.0) for d in self.historical_data[-10:]]
-        
-        # 计算趋势
-        if len(detection_scores) >= 2:
-            trend = "increasing" if detection_scores[-1] > detection_scores[0] else "decreasing"
-            confidence = min(1.0, abs(detection_scores[-1] - detection_scores[0]) * 10)
-        else:
-            trend = "stable"
-            confidence = 0.5
-        
-        return {
-            "trend": trend,
-            "confidence": confidence,
-            "current_level": detection_scores[-1] if detection_scores else 0.0,
-            "predicted_change": self._calculate_trend_change(detection_scores)
-        }
-    
-    def _predict_performance_forecast(self) -> Dict[str, Any]:
-        """预测性能"""
-        if len(self.historical_data) < 5:
-            return {"forecast": "insufficient_data", "confidence": 0.0}
-        
-        # 提取性能指标
-        response_times = [d.get("response_time", 0.0) for d in self.historical_data[-5:]]
-        success_rates = [d.get("success_rate", 0.0) for d in self.historical_data[-5:]]
-        
-        # 预测性能趋势
-        avg_response_time = np.mean(response_times)
-        avg_success_rate = np.mean(success_rates)
-        
-        return {
-            "forecast": "improving" if avg_success_rate > 0.8 else "declining",
-            "confidence": min(1.0, avg_success_rate),
-            "predicted_response_time": avg_response_time * 0.9,  # 假设改进
-            "predicted_success_rate": min(1.0, avg_success_rate * 1.1)
-        }
-    
-    def _predict_success_probability(self) -> Dict[str, Any]:
-        """预测成功概率"""
-        if len(self.historical_data) < 3:
-            return {"probability": 0.5, "confidence": 0.0}
-        
-        # 基于最近的成功率预测
-        recent_success_rates = [d.get("success_rate", 0.0) for d in self.historical_data[-3:]]
-        avg_success_rate = np.mean(recent_success_rates)
-        
-        # 考虑时间因素
-        time_factor = self._calculate_time_factor()
-        
-        predicted_probability = avg_success_rate * time_factor
-        
-        return {
-            "probability": min(1.0, predicted_probability),
-            "confidence": min(1.0, avg_success_rate),
-            "factors": {
-                "historical_success": avg_success_rate,
-                "time_factor": time_factor
-            }
-        }
-    
-    def _predict_optimal_timing(self) -> Dict[str, Any]:
-        """预测最佳时机"""
-        if len(self.historical_data) < 10:
-            return {"optimal_time": "unknown", "confidence": 0.0}
-        
-        # 分析时间模式
-        time_patterns = {}
-        for data in self.historical_data:
-            time_of_day = data.get("time_of_day", 0.0)
-            success_rate = data.get("success_rate", 0.0)
+        for similar_task in similar_tasks:
+            task_data = self.task_performance[similar_task]
             
-            hour = int(time_of_day * 24)
-            if hour not in time_patterns:
-                time_patterns[hour] = []
-            time_patterns[hour].append(success_rate)
-        
-        # 找到最佳时间
-        best_hour = None
-        best_avg_success = 0.0
-        
-        for hour, success_rates in time_patterns.items():
-            avg_success = np.mean(success_rates)
-            if avg_success > best_avg_success:
-                best_avg_success = avg_success
-                best_hour = hour
-        
-        return {
-            "optimal_time": f"{best_hour:02d}:00" if best_hour is not None else "unknown",
-            "confidence": min(1.0, best_avg_success),
-            "success_rate_at_optimal": best_avg_success
-        }
-    
-    def _predict_risk_assessment(self) -> Dict[str, Any]:
-        """预测风险评估"""
-        if len(self.historical_data) < 5:
-            return {"risk_level": "unknown", "confidence": 0.0}
-        
-        # 分析风险因素
-        recent_data = self.historical_data[-5:]
-        
-        detection_scores = [d.get("detection_score", 0.0) for d in recent_data]
-        error_rates = [d.get("error_rate", 0.0) for d in recent_data]
-        
-        avg_detection_score = np.mean(detection_scores)
-        avg_error_rate = np.mean(error_rates)
-        
-        # 计算风险分数
-        risk_score = (avg_detection_score * 0.6 + avg_error_rate * 0.4)
-        
-        if risk_score > 0.7:
-            risk_level = "high"
-        elif risk_score > 0.4:
-            risk_level = "medium"
-        else:
-            risk_level = "low"
-        
-        return {
-            "risk_level": risk_level,
-            "risk_score": risk_score,
-            "confidence": min(1.0, 1.0 - risk_score),
-            "factors": {
-                "detection_risk": avg_detection_score,
-                "error_risk": avg_error_rate
+            knowledge = {
+                "task_id": similar_task,
+                "successful_strategies": task_data.get("successful_strategies", []),
+                "optimal_parameters": task_data.get("optimal_parameters", {}),
+                "performance_metrics": task_data.get("performance_metrics", {})
             }
+            
+            transferred_knowledge.append(knowledge)
+        
+        # 应用迁移的知识
+        adaptation_result = self._adapt_from_transferred_knowledge(task_id, transferred_knowledge)
+        
+        return {
+            "success": True,
+            "transferred_tasks": similar_tasks,
+            "transferred_knowledge": transferred_knowledge,
+            "adaptation_result": adaptation_result
         }
     
-    def _calculate_trend_change(self, values: List[float]) -> float:
-        """计算趋势变化"""
-        if len(values) < 2:
-            return 0.0
+    def _adapt_from_transferred_knowledge(self, task_id: str, 
+                                        transferred_knowledge: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """从迁移知识中适应"""
         
-        # 简单的线性回归斜率
-        x = np.arange(len(values))
-        y = np.array(values)
+        # 聚合最优参数
+        optimal_parameters = {}
         
-        slope = np.polyfit(x, y, 1)[0]
-        return slope
+        for knowledge in transferred_knowledge:
+            params = knowledge.get("optimal_parameters", {})
+            for key, value in params.items():
+                if key not in optimal_parameters:
+                    optimal_parameters[key] = []
+                optimal_parameters[key].append(value)
+        
+        # 计算平均参数
+        adapted_parameters = {}
+        for key, values in optimal_parameters.items():
+            if values:
+                adapted_parameters[key] = sum(values) / len(values)
+        
+        return {
+            "adapted_parameters": adapted_parameters,
+            "confidence": min(1.0, len(transferred_knowledge) * 0.2)
+        }
     
-    def _calculate_time_factor(self) -> float:
-        """计算时间因子"""
-        current_hour = time.localtime().tm_hour
+    def _update_meta_parameters(self, task_id: str, performance_data: Dict[str, Any]) -> Dict[str, Any]:
+        """更新元参数"""
         
-        # 基于时间的成功概率调整
-        if 9 <= current_hour <= 11 or 14 <= current_hour <= 16:
-            return 1.1  # 工作时间，成功率较高
-        elif 12 <= current_hour <= 13:
-            return 0.9  # 午休时间，成功率较低
-        elif 18 <= current_hour <= 22:
-            return 1.05  # 晚上时间，成功率中等
-        else:
-            return 0.95  # 其他时间，成功率较低
+        # 根据性能调整元参数
+        success_rate = performance_data.get("success_rate", 0.5)
+        
+        if success_rate > 0.8:
+            # 性能好，减少学习率
+            self.meta_parameters["learning_rate"] *= 0.9
+        elif success_rate < 0.5:
+            # 性能差，增加学习率
+            self.meta_parameters["learning_rate"] *= 1.1
+        
+        # 确保参数在合理范围内
+        self.meta_parameters["learning_rate"] = max(0.001, min(0.1, self.meta_parameters["learning_rate"]))
+        
+        return {
+            "updated_parameters": self.meta_parameters.copy(),
+            "performance_based_adjustment": True
+        }
 
 
 class AdaptiveLearningSystem:
     """自适应学习系统主类"""
     
     def __init__(self):
-        self.online_learner = OnlineLearner()
-        self.pattern_recognizer = PatternRecognizer()
-        self.strategy_adapter = StrategyAdapter()
-        self.knowledge_base = DynamicKnowledgeBase()
-        self.predictor = PredictiveAnalyzer()
+        self.learning_engine = AdaptiveLearningEngine()
+        self.meta_optimizer = MetaLearningOptimizer()
+        self.logger = logger.bind(name="adaptive_learning_system")
         
-    def learn_online(self, detection_data: Dict[str, Any]) -> Dict[str, Any]:
-        """在线学习"""
-        return self.online_learner.learn(detection_data)
-    
-    def recognize_pattern(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """模式识别"""
-        return self.pattern_recognizer.recognize(data)
-    
-    def adapt_strategy(self, new_pattern: Dict[str, Any]) -> Dict[str, Any]:
-        """策略适应"""
-        return self.strategy_adapter.adapt(new_pattern)
-    
-    def predict_changes(self, current_data: Dict[str, Any]) -> Dict[str, Any]:
-        """预测变化"""
-        return self.predictor.predict(current_data)
-    
-    def update_knowledge(self, data: Dict[str, Any]) -> None:
-        """更新知识库"""
-        self.knowledge_base.update(data)
-    
-    def query_knowledge(self, query_type: str, query_data: Dict[str, Any]) -> Dict[str, Any]:
-        """查询知识库"""
-        return self.knowledge_base.query(query_type, query_data)
-    
-    def comprehensive_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """综合分析"""
+    def process_learning_request(self, context_data: Dict[str, Any]) -> Dict[str, Any]:
+        """处理学习请求"""
         
-        # 在线学习
-        learning_result = self.learn_online(data)
+        # 创建学习上下文
+        context = LearningContext(
+            environment_type=EnvironmentType(context_data.get("environment_type", "unknown")),
+            success_rate=context_data.get("success_rate", 0.5),
+            detection_rate=context_data.get("detection_rate", 0.5),
+            performance_metrics=context_data.get("performance_metrics", {}),
+            adaptation_needed=context_data.get("adaptation_needed", False),
+            timestamp=time.time()
+        )
         
-        # 模式识别
-        pattern_result = self.recognize_pattern(data)
+        # 执行学习
+        learning_result = self.learning_engine.learn_from_experience(context)
         
-        # 策略适应
-        strategy_result = self.adapt_strategy(data)
-        
-        # 预测分析
-        prediction_result = self.predict_changes(data)
-        
-        # 更新知识库
-        self.update_knowledge({
-            "type": "comprehensive_analysis",
-            "data": data,
-            "learning_result": learning_result,
-            "pattern_result": pattern_result,
-            "strategy_result": strategy_result,
-            "prediction_result": prediction_result,
-            "timestamp": time.time()
-        })
+        # 元学习优化
+        meta_result = self.meta_optimizer.optimize_meta_learning(
+            context_data.get("task_id", "default"),
+            context_data
+        )
         
         return {
-            "learning": learning_result,
-            "pattern_recognition": pattern_result,
-            "strategy_adaptation": strategy_result,
-            "predictions": prediction_result,
-            "recommendations": self._generate_comprehensive_recommendations(
-                learning_result, pattern_result, strategy_result, prediction_result
-            )
+            "learning_result": learning_result,
+            "meta_result": meta_result,
+            "system_status": self.get_system_status()
         }
     
-    def _generate_comprehensive_recommendations(self, learning_result: Dict[str, Any],
-                                             pattern_result: Dict[str, Any],
-                                             strategy_result: Dict[str, Any],
-                                             prediction_result: Dict[str, Any]) -> List[str]:
-        """生成综合建议"""
-        recommendations = []
-        
-        # 基于学习结果的建议
-        if learning_result.get("confidence", 0.0) < 0.7:
-            recommendations.append("学习置信度较低，建议收集更多数据")
-        
-        # 基于模式识别的建议
-        pattern_class = pattern_result.get("pattern_class", "")
-        if pattern_class == "poor":
-            recommendations.append("检测到性能较差的模式，建议优化策略")
-        
-        # 基于策略适应的建议
-        strategy = strategy_result.get("strategy", "")
-        if strategy == "stealth":
-            recommendations.append("当前采用隐身策略，注意平衡速度和隐蔽性")
-        
-        # 基于预测的建议
-        predictions = prediction_result.get("predictions", {})
-        detection_trend = predictions.get("detection_trend", {})
-        if detection_trend.get("trend") == "increasing":
-            recommendations.append("检测趋势上升，建议加强反检测措施")
-        
-        if not recommendations:
-            recommendations.append("当前状态良好，继续保持")
-        
-        return recommendations
+    def get_system_status(self) -> Dict[str, Any]:
+        """获取系统状态"""
+        return {
+            "learning_engine_status": self.learning_engine._get_learning_progress(),
+            "meta_optimizer_status": {
+                "total_tasks": len(self.meta_optimizer.task_performance),
+                "meta_parameters": self.meta_optimizer.meta_parameters
+            },
+            "total_strategies": len(self.learning_engine.adaptation_strategies),
+            "current_environment": self.learning_engine.current_environment.value
+        }
 
 
 # 使用示例
@@ -1090,22 +757,27 @@ if __name__ == "__main__":
     # 创建自适应学习系统
     adaptive_system = AdaptiveLearningSystem()
     
-    # 模拟检测数据
-    detection_data = {
-        "detection_score": 0.3,
-        "success_rate": 0.85,
-        "response_time": 15.0,
-        "error_rate": 0.05,
-        "naturalness_score": 0.9,
-        "session_duration": 1800,
-        "page_count": 5,
-        "interaction_count": 25,
-        "time_of_day": 0.5,
-        "user_type_factor": 1.0
+    # 模拟学习请求
+    context_data = {
+        "task_id": "ticket_grabbing_001",
+        "environment_type": "changing",
+        "success_rate": 0.75,
+        "detection_rate": 0.25,
+        "performance_metrics": {
+            "response_time": 1.2,
+            "throughput": 10.5,
+            "error_rate": 0.05
+        },
+        "adaptation_needed": True
     }
     
-    # 进行综合分析
-    analysis_result = adaptive_system.comprehensive_analysis(detection_data)
+    # 处理学习请求
+    result = adaptive_system.process_learning_request(context_data)
     
-    print("自适应学习系统分析结果:")
-    print(json.dumps(analysis_result, indent=2, ensure_ascii=False)) 
+    print("自适应学习结果:")
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    
+    # 获取系统状态
+    status = adaptive_system.get_system_status()
+    print("\n系统状态:")
+    print(json.dumps(status, indent=2, ensure_ascii=False)) 
