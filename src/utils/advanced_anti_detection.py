@@ -113,6 +113,9 @@ class StealthManager:
         for i in range(4):
             start = range_choice[i * 2]
             end = range_choice[i * 2 + 1]
+            # 确保start <= end
+            if start > end:
+                start, end = end, start
             ip_parts.append(str(random.randint(start, end)))
         
         return ".".join(ip_parts)
