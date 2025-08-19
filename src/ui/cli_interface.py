@@ -20,6 +20,9 @@ from ..data.config_manager import ConfigManager
 from ..data.models import TicketRequest, PlatformType, UserConfig, GrabResult
 from ..platforms.damai_adapter import DamaiMobileAdapter, DamaiConfig
 from ..utils.logger import get_logger, set_log_level
+from ..utils.task_scheduler import TaskScheduler
+from ..utils.metrics import start_metrics_server
+from .web_console import WebConsoleServer
 
 
 class CLIInterface:
@@ -30,6 +33,8 @@ class CLIInterface:
         self.config_manager = ConfigManager()
         self.grab_engine = GrabEngine()
         self.logger = get_logger("cli_interface")
+        self.scheduler: TaskScheduler | None = None
+        self.web_console: WebConsoleServer | None = None
         self.is_running = False
         
         # 初始化配置
@@ -47,7 +52,21 @@ class CLIInterface:
             damai_adapter = DamaiMobileAdapter(damai_config)
             self.grab_engine.add_strategy(damai_adapter)
             
+            # 启动 Prometheus 指标端口（可在 settings 中配置端口，默认 8001）
+            metrics_port = int(self.config_manager.get_setting("metrics_port", 8001))
+            start_metrics_server(metrics_port)
+
             self.logger.info("CLI界面初始化完成")
+            # 启动任务调度器（后台自动抢）
+            self.scheduler = TaskScheduler(self.config_manager, self.grab_engine)
+            self.scheduler.start()
+
+            # 启动 Web 控制台（可配置开关与端口）
+            web_enabled = bool(self.config_manager.get_setting("web_console_enabled", True))
+            if web_enabled:
+                web_port = int(self.config_manager.get_setting("web_port", 8080))
+                self.web_console = WebConsoleServer(self.config_manager, self.grab_engine, port=web_port)
+                self.web_console.start()
         except Exception as e:
             self.logger.error(f"CLI界面初始化失败: {e}")
     
@@ -311,6 +330,11 @@ class CLIInterface:
         table.add_column("目标价格", style="yellow")
         table.add_column("数量", style="magenta")
         table.add_column("座位偏好", style="white")
+        table.add_column("场次ID", style="cyan")
+        table.add_column("场次关键词", style="cyan")
+        table.add_column("设备ID", style="white")
+        table.add_column("自动开始", style="green")
+        table.add_column("开始时间", style="yellow")
         
         for i, request in enumerate(requests, 1):
             table.add_row(
@@ -319,7 +343,12 @@ class CLIInterface:
                 request.platform.value,
                 str(request.target_price) if request.target_price else "不限",
                 str(request.quantity),
-                ", ".join(request.seat_preference) if request.seat_preference else "推荐"
+                ", ".join(request.seat_preference) if request.seat_preference else "推荐",
+                request.performance_id or "-",
+                ", ".join(request.performance_keywords) if getattr(request, "performance_keywords", None) else "-",
+                getattr(request, "device_id", "-") or "-",
+                "是" if getattr(request, "auto_start", False) else "否",
+                getattr(request, "start_time", "-") or "-"
             )
         
         self.console.print(table)
@@ -329,6 +358,9 @@ class CLIInterface:
         self.console.print("添加抢票任务")
         
         event_id = Prompt.ask("请输入活动ID")
+        performance_id = Prompt.ask("请输入场次ID(可选)", default="")
+        performance_keywords = Prompt.ask("请输入场次关键词(逗号分隔，可选)", default="")
+        device_id = Prompt.ask("请输入设备序列号(ADB序列/IP:端口，可选)", default="")
         
         # 选择平台
         platforms = list(PlatformType)
@@ -351,15 +383,26 @@ class CLIInterface:
         
         seat_preference = Prompt.ask("座位偏好(用逗号分隔，可选)", default="")
         seat_preference = [s.strip() for s in seat_preference.split(",")] if seat_preference else None
+        performance_keywords = [s.strip() for s in performance_keywords.split(",")] if performance_keywords else None
+
+        auto_start = Confirm.ask("是否自动开始?", default=False)
+        start_time = None
+        if auto_start:
+            start_time = Prompt.ask("请输入自动开始时间(YYYY-MM-DD HH:MM:SS)", default="") or None
         
         retry_times = IntPrompt.ask("重试次数", default=3)
         retry_interval = FloatPrompt.ask("重试间隔(秒)", default=1.0)
         
         request = TicketRequest(
             event_id=event_id,
+            performance_id=performance_id or None,
             platform=platform,
             target_price=target_price,
             seat_preference=seat_preference,
+            performance_keywords=performance_keywords,
+            device_id=device_id or None,
+            auto_start=auto_start,
+            start_time=start_time,
             quantity=quantity,
             retry_times=retry_times,
             retry_interval=retry_interval
@@ -659,4 +702,7 @@ class CLIInterface:
             self.logger.error(f"CLI界面运行异常: {e}")
             self.console.print(f"程序运行异常: {e}", style="red")
         finally:
-            self.grab_engine.stop() 
+            if self.scheduler:
+                self.scheduler.stop()
+            # Web 控制台后台线程随进程退出
+            self.grab_engine.stop()

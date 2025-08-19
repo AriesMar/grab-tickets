@@ -32,7 +32,16 @@ class ConfigManager:
             "default_retry_times": 3,
             "default_retry_interval": 1.0,
             "auto_save_config": True,
-            "enable_notifications": True
+            "enable_notifications": True,
+            # 监控与控制台
+            "metrics_port": 8001,
+            "web_console_enabled": True,
+            "web_port": 8080,
+            "web_token": "",  # 留空则不鉴权
+            # 通知
+            "captcha_webhook": "",  # 可选：验证码通知的Webhook地址
+            # 调度周期
+            "scheduler_interval_seconds": 1
         }
     
     def load_user_config(self) -> Optional[UserConfig]:

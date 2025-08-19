@@ -45,6 +45,12 @@ class TicketInfo(BaseModel):
 class TicketRequest(BaseModel):
     """抢票请求"""
     event_id: str = Field(..., description="活动ID")
+    performance_id: Optional[str] = Field(default=None, description="场次ID")
+    performance_keywords: Optional[List[str]] = Field(default=None, description="场次关键词（如日期/时间/关键字）")
+    device_id: Optional[str] = Field(default=None, description="设备序列号(ADB序列/IP:端口)，用于多设备并发")
+    auto_start: bool = Field(default=False, description="是否自动开始")
+    start_time: Optional[str] = Field(default=None, description="自动开始时间（本地时间，格式 YYYY-MM-DD HH:MM:SS）")
+    start_offset_seconds: Optional[int] = Field(default=None, description="相对当前的开始时间（秒），与 start_time 二选一")
     platform: PlatformType = Field(..., description="平台类型")
     target_price: Optional[float] = Field(default=None, description="目标价格")
     seat_preference: Optional[List[str]] = Field(default=None, description="座位偏好")
@@ -56,6 +62,12 @@ class TicketRequest(BaseModel):
         schema_extra = {
             "example": {
                 "event_id": "123456",
+                "performance_id": "987654",
+                "performance_keywords": ["2024-12-31", "19:30"],
+                "device_id": "192.168.1.23:5555",
+                "auto_start": True,
+                "start_time": "2024-12-31 19:00:00",
+                "start_offset_seconds": 300,
                 "platform": "damai",
                 "target_price": 580.0,
                 "seat_preference": ["A区", "B区"],
@@ -112,6 +124,12 @@ class PlatformConfig(BaseModel):
     timeout: int = Field(default=30, description="超时时间(秒)")
     max_retries: int = Field(default=3, description="最大重试次数")
     rate_limit: float = Field(default=1.0, description="请求频率限制(秒)")
+    # 以下为部分平台（如大麦APP）所需的可选字段
+    app_package: Optional[str] = Field(default=None, description="移动端应用包名")
+    app_activity: Optional[str] = Field(default=None, description="移动端应用主活动/入口")
+    device_id: Optional[str] = Field(default=None, description="设备ID")
+    session_token: Optional[str] = Field(default=None, description="会话令牌")
+    user_info: Optional[Dict[str, Any]] = Field(default=None, description="用户信息")
     
     class Config:
         schema_extra = {

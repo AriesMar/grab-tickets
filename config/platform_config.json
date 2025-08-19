@@ -1,0 +1,26 @@
+{
+  "damai": {
+    "platform": "damai",
+    "base_url": "https://www.damai.cn",
+    "api_endpoints": {
+      "search": "/api/search",
+      "detail": "/api/detail",
+      "order": "/api/order",
+      "login": "/api/login",
+      "captcha": "/api/captcha"
+    },
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+      "Referer": "https://www.damai.cn/",
+      "Origin": "https://www.damai.cn"
+    },
+    "timeout": 30,
+    "max_retries": 3,
+    "rate_limit": 1.0,
+    "app_package": "cn.damai",
+    "app_activity": "cn.damai.homepage.MainActivity",
+    "device_id": null,
+    "session_token": null,
+    "user_info": null
+  }
+}

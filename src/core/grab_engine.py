@@ -10,6 +10,8 @@ from loguru import logger
 
 from ..data.models import TicketRequest, GrabResult, TicketInfo, PlatformType
 from ..utils.logger import get_logger
+from ..utils.metrics import grab_requests_total, grab_success_total, grab_failure_total, grab_duration_seconds
+from ..utils.result_buffer import add_result_safely
 
 
 class GrabStrategy(ABC):
@@ -79,6 +81,7 @@ class GrabEngine:
         """抢票主方法"""
         self.logger.info(f"开始抢票: {request.event_id} on {request.platform}")
         self._trigger_callbacks("on_start", request)
+        grab_requests_total.inc()
         
         strategy = self.get_strategy(request.platform)
         if not strategy:
@@ -87,17 +90,23 @@ class GrabEngine:
                 message=f"未找到适合的策略处理平台: {request.platform}"
             )
             self._trigger_callbacks("on_failure", request, result)
+            grab_failure_total.inc()
             return result
         
         try:
-            result = await strategy.execute(request)
+            with grab_duration_seconds.time():
+                result = await strategy.execute(request)
             
             if result.success:
                 self.logger.success(f"抢票成功: {request.event_id}")
                 self._trigger_callbacks("on_success", request, result)
+                grab_success_total.inc()
+                add_result_safely(request, result)
             else:
                 self.logger.warning(f"抢票失败: {request.event_id}, 原因: {result.message}")
                 self._trigger_callbacks("on_failure", request, result)
+                grab_failure_total.inc()
+                add_result_safely(request, result)
             
             self._trigger_callbacks("on_complete", request, result)
             return result
@@ -110,6 +119,8 @@ class GrabEngine:
             )
             self._trigger_callbacks("on_failure", request, result)
             self._trigger_callbacks("on_complete", request, result)
+            grab_failure_total.inc()
+            add_result_safely(request, result)
             return result
     
     async def grab_tickets_batch(self, requests: List[TicketRequest]) -> List[GrabResult]:

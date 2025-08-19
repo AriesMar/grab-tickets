@@ -12,12 +12,14 @@ import cv2
 import numpy as np
 from PIL import Image
 import pyautogui
+import xml.etree.ElementTree as ET
 
 from ..core.grab_engine import GrabStrategy
 from ..data.models import TicketRequest, GrabResult, PlatformType, TicketInfo, TicketStatus
 from ..utils.http_client import RetryHttpClient
 from ..utils.logger import get_logger
 from ..data.models import PlatformConfig
+from ..utils.notifications import notify_warn
 
 
 class DamaiConfig(PlatformConfig):
@@ -72,35 +74,35 @@ class DamaiMobileAdapter(GrabStrategy):
         
         try:
             # 1. 检查设备连接
-            if not await self._check_device():
+            if not await self._check_device(request):
                 return GrabResult(
                     success=False,
                     message="设备连接失败，请确保手机已连接并开启USB调试"
                 )
             
             # 2. 启动大麦网APP
-            if not await self._launch_app():
+            if not await self._launch_app(request):
                 return GrabResult(
                     success=False,
                     message="启动大麦网APP失败"
                 )
             
             # 3. 检查登录状态
-            if not await self._check_login():
+            if not await self._check_login(request):
                 return GrabResult(
                     success=False,
                     message="用户未登录，请先登录大麦网APP"
                 )
             
             # 4. 搜索活动
-            if not await self._search_event(request.event_id):
+            if not await self._search_event(request, request.event_id):
                 return GrabResult(
                     success=False,
                     message=f"未找到活动: {request.event_id}"
                 )
             
             # 5. 进入活动详情
-            if not await self._enter_event_detail():
+            if not await self._enter_event_detail(request):
                 return GrabResult(
                     success=False,
                     message="进入活动详情页失败"
@@ -128,7 +130,7 @@ class DamaiMobileAdapter(GrabStrategy):
                 )
             
             # 9. 等待进入待支付页面
-            if not await self._wait_for_payment_page():
+            if not await self._wait_for_payment_page(request):
                 return GrabResult(
                     success=False,
                     message="进入待支付页面失败"
@@ -148,11 +150,16 @@ class DamaiMobileAdapter(GrabStrategy):
                 message=f"抢票过程中发生异常: {str(e)}"
             )
     
-    async def _check_device(self) -> bool:
+    def _adb_prefix(self, request: Optional[TicketRequest] = None) -> List[str]:
+        """返回 ADB 命令前缀，支持绑定设备 (-s <serial>)"""
+        serial = getattr(request, "device_id", None) if request else None
+        return ["adb"] + (["-s", serial] if serial else [])
+
+    async def _check_device(self, request: Optional[TicketRequest] = None) -> bool:
         """检查设备连接"""
         try:
             result = subprocess.run(
-                ["adb", "devices"], 
+                self._adb_prefix(request) + ["devices"], 
                 capture_output=True, 
                 text=True, 
                 timeout=10
@@ -180,12 +187,12 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"检查设备连接异常: {e}")
             return False
     
-    async def _launch_app(self) -> bool:
+    async def _launch_app(self, request: Optional[TicketRequest] = None) -> bool:
         """启动大麦网APP"""
         try:
             # 强制停止APP
             subprocess.run(
-                ["adb", "shell", "am", "force-stop", self.config.app_package],
+                self._adb_prefix(request) + ["shell", "am", "force-stop", self.config.app_package],
                 capture_output=True,
                 timeout=10
             )
@@ -194,7 +201,7 @@ class DamaiMobileAdapter(GrabStrategy):
             
             # 启动APP
             result = subprocess.run(
-                ["adb", "shell", "am", "start", "-n", f"{self.config.app_package}/{self.config.app_activity}"],
+                self._adb_prefix(request) + ["shell", "am", "start", "-n", f"{self.config.app_package}/{self.config.app_activity}"],
                 capture_output=True,
                 timeout=10
             )
@@ -212,11 +219,11 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"启动APP异常: {e}")
             return False
     
-    async def _check_login(self) -> bool:
+    async def _check_login(self, request: Optional[TicketRequest] = None) -> bool:
         """检查登录状态"""
         try:
             # 截图检查登录状态
-            screenshot = self._take_screenshot()
+            screenshot = self._take_screenshot(request)
             if screenshot is None:
                 return False
             
@@ -227,6 +234,17 @@ class DamaiMobileAdapter(GrabStrategy):
             # 检查是否有安全验证
             if self._detect_security_check(screenshot):
                 self.logger.warning("检测到安全验证，可能需要人工处理")
+                notify_warn("检测到验证码/安全校验，请在设备上完成后继续")
+                # 可选Webhook
+                try:
+                    from ..data.config_manager import ConfigManager
+                    from ..utils.notifications import notify_webhook
+                    cfg = ConfigManager()
+                    url = cfg.get_setting("captcha_webhook", "")
+                    if url:
+                        notify_webhook(url, "验证码提醒", "检测到安全校验，请尽快在设备上完成后返回")
+                except Exception:
+                    pass
                 return False
             
             # 临时返回True，实际应该根据图像识别结果判断
@@ -237,7 +255,7 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"检查登录状态异常: {e}")
             return False
     
-    async def _search_event(self, event_id: str) -> bool:
+    async def _search_event(self, request: TicketRequest, event_id: str) -> bool:
         """搜索活动"""
         try:
             # 添加隐身延迟
@@ -249,7 +267,7 @@ class DamaiMobileAdapter(GrabStrategy):
             # 点击搜索按钮
             search_button_pos = self._find_element_by_text("搜索")
             if search_button_pos:
-                self._tap_screen(search_button_pos[0], search_button_pos[1])
+                self._tap_screen(search_button_pos[0], search_button_pos[1], request)
                 time.sleep(1)
             
             # 添加隐身行为
@@ -259,11 +277,11 @@ class DamaiMobileAdapter(GrabStrategy):
             self._simulate_human_behavior()
             
             # 输入活动ID或关键词
-            self._input_text(event_id)
+            self._input_text(event_id, request)
             time.sleep(1)
             
             # 点击搜索
-            self._tap_screen(100, 200)  # 搜索按钮位置
+            self._tap_screen(100, 200, request)  # 搜索按钮位置
             time.sleep(2)
             
             self.logger.info(f"搜索活动: {event_id}")
@@ -273,11 +291,11 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"搜索活动异常: {e}")
             return False
     
-    async def _enter_event_detail(self) -> bool:
+    async def _enter_event_detail(self, request: TicketRequest) -> bool:
         """进入活动详情页"""
         try:
             # 点击第一个搜索结果
-            self._tap_screen(200, 300)  # 搜索结果位置
+            self._tap_screen(200, 300, request)  # 搜索结果位置
             time.sleep(2)
             
             self.logger.info("进入活动详情页")
@@ -287,9 +305,173 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"进入活动详情页异常: {e}")
             return False
     
+    def _dump_ui_xml(self, request: Optional[TicketRequest] = None) -> Optional[str]:
+        """通过 uiautomator dump 获取当前界面 XML"""
+        try:
+            # 导出到设备临时文件
+            dump_cmd = self._adb_prefix(request) + ["shell", "uiautomator", "dump", "/sdcard/uidump.xml"]
+            subprocess.run(dump_cmd, capture_output=True, timeout=5)
+            # 读取 XML 内容
+            cat_cmd = self._adb_prefix(request) + ["shell", "cat", "/sdcard/uidump.xml"]
+            result = subprocess.run(cat_cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip().startswith("<?xml"):
+                return result.stdout
+            self.logger.warning("未能获取有效的UI层级XML")
+            return None
+        except Exception as e:
+            self.logger.error(f"获取UI层级XML失败: {e}")
+            return None
+
+    def _parse_bounds_to_center(self, bounds: str) -> Optional[tuple]:
+        """解析 bounds 字符串为中心坐标: [x1,y1][x2,y2] -> (cx, cy)"""
+        try:
+            # 形如 [48,122][1032,230]
+            parts = bounds.replace("]", "").split("[")
+            coords = [p for p in parts if p]
+            x1, y1 = map(int, coords[0].split(","))
+            x2, y2 = map(int, coords[1].split(","))
+            return (int((x1 + x2) / 2), int((y1 + y2) / 2))
+        except Exception:
+            return None
+
+    def _find_node_center_by_keywords(self, xml_text: str, keywords: List[str]) -> Optional[tuple]:
+        """在 UI XML 中查找包含所有关键词的节点中心坐标（大小写不敏感）"""
+        try:
+            root = ET.fromstring(xml_text)
+            # UIAutomator XML 节点通常为 node 标签
+            nodes = root.iter()
+            normalized_keywords = [k.strip().lower() for k in keywords if k and k.strip()]
+            best_match = None
+            best_score = -1
+            for node in nodes:
+                attrib = node.attrib
+                text_fields = [
+                    attrib.get("text", ""),
+                    attrib.get("content-desc", ""),
+                    attrib.get("resource-id", ""),
+                    attrib.get("class", ""),
+                    attrib.get("contentDescription", "")
+                ]
+                combined = " ".join(text_fields).lower()
+                if not combined:
+                    continue
+                # 计算匹配得分：包含的关键词个数
+                score = sum(1 for k in normalized_keywords if k in combined)
+                if score <= 0:
+                    continue
+                bounds = attrib.get("bounds")
+                if not bounds:
+                    continue
+                if score > best_score:
+                    center = self._parse_bounds_to_center(bounds)
+                    if center:
+                        best_match = center
+                        best_score = score
+            return best_match
+        except Exception as e:
+            self.logger.error(f"解析UI层级XML并匹配关键词失败: {e}")
+            return None
+
+    def _swipe_up(self, request: Optional[TicketRequest] = None, duration_ms: int = 300):
+        """上滑一屏（简单实现）"""
+        try:
+            # 以中间向上滑动
+            subprocess.run(
+                self._adb_prefix(request) + [
+                    "shell", "input", "swipe", "500", "1400", "500", "400", str(duration_ms)
+                ],
+                capture_output=True,
+                timeout=5
+            )
+        except Exception as e:
+            self.logger.error(f"滑动异常: {e}")
+
+    async def _select_performance(self, performance_id: Optional[str], performance_keywords: Optional[List[str]] = None, request: Optional[TicketRequest] = None) -> bool:
+        """选择场次（支持 performance_id 或关键词，优先使用 UI 层级匹配；加入多轮滑动重试）"""
+        try:
+            # 多轮匹配：初次 + 向上滑动 3 次
+            attempts = 4
+            for attempt in range(attempts):
+                # 1) 若提供 performance_id，先尝试在 UI 文本中直接匹配该 ID
+                if performance_id:
+                    xml_text = self._dump_ui_xml(request)
+                    if xml_text:
+                        center = self._find_node_center_by_keywords(xml_text, [performance_id])
+                        if center:
+                            self._tap_screen(center[0], center[1], request)
+                            time.sleep(1)
+                            self.logger.info(f"已通过ID选择场次: {performance_id}")
+                            return True
+                # 2) 使用关键词匹配
+                if performance_keywords:
+                    xml_text = self._dump_ui_xml(request)
+                    if xml_text:
+                        center = self._find_node_center_by_keywords(xml_text, performance_keywords)
+                        if center:
+                            self._tap_screen(center[0], center[1], request)
+                            time.sleep(1)
+                            self.logger.info(f"根据关键词选择场次: {performance_keywords}")
+                            return True
+                # 若非最后一次，尝试上滑后重试
+                if attempt < attempts - 1:
+                    self._swipe_up(request)
+                    time.sleep(0.8)
+
+            # 兜底：默认第一场
+            self._tap_screen(220, 360, request)
+            time.sleep(1)
+            self.logger.info("未指定或未匹配到场次，默认选择第一场")
+            return True
+        except Exception as e:
+            self.logger.error(f"选择场次异常: {e}")
+            return False
+
+    async def _select_performance(self, performance_id: Optional[str], performance_keywords: Optional[List[str]] = None, request: Optional[TicketRequest] = None) -> bool:
+        """选择场次（支持 performance_id 或关键词，优先使用 UI 层级匹配）"""
+        try:
+            # 1) 若提供 performance_id，先尝试在 UI 文本中直接匹配该 ID
+            if performance_id:
+                xml_text = self._dump_ui_xml(request)
+                if xml_text:
+                    center = self._find_node_center_by_keywords(xml_text, [performance_id])
+                    if center:
+                        self._tap_screen(center[0], center[1], request)
+                        time.sleep(1)
+                        self.logger.info(f"已通过ID选择场次: {performance_id}")
+                        return True
+                # 若UI层级中未直接出现ID，则兜底点击默认位置
+                self._tap_screen(220, 360, request)
+                time.sleep(1)
+                self.logger.info(f"未在UI层级直接找到ID，已尝试默认位置选择: {performance_id}")
+                return True
+
+            # 2) 使用关键词匹配：如 日期/时间/‘晚场’ 等
+            if performance_keywords:
+                xml_text = self._dump_ui_xml(request)
+                if xml_text:
+                    center = self._find_node_center_by_keywords(xml_text, performance_keywords)
+                    if center:
+                        self._tap_screen(center[0], center[1], request)
+                        time.sleep(1)
+                        self.logger.info(f"根据关键词选择场次: {performance_keywords}")
+                        return True
+
+            # 3) 兜底：默认第一场
+            self._tap_screen(220, 360, request)
+            time.sleep(1)
+            self.logger.info("未指定或未匹配到场次，默认选择第一场")
+            return True
+        except Exception as e:
+            self.logger.error(f"选择场次异常: {e}")
+            return False
+
     async def _select_ticket_type(self, request: TicketRequest) -> bool:
         """选择票档"""
         try:
+            # 先按场次选择（优先 ID，次选关键词）
+            if not await self._select_performance(getattr(request, "performance_id", None), getattr(request, "performance_keywords", None), request):
+                return False
+
             # 根据目标价格选择票档
             if request.target_price:
                 # 查找价格接近的票档
@@ -297,7 +479,7 @@ class DamaiMobileAdapter(GrabStrategy):
                 selected_type = self._select_best_ticket_type(ticket_types, request.target_price)
                 
                 if selected_type:
-                    self._tap_screen(selected_type['x'], selected_type['y'])
+                    self._tap_screen(selected_type['x'], selected_type['y'], request)
                     time.sleep(1)
                     self.logger.info(f"选择票档: {selected_type['name']}")
                     return True
@@ -306,7 +488,7 @@ class DamaiMobileAdapter(GrabStrategy):
                     return False
             else:
                 # 选择第一个可用票档
-                self._tap_screen(200, 400)  # 默认票档位置
+                self._tap_screen(200, 400, request)  # 默认票档位置
                 time.sleep(1)
                 self.logger.info("选择默认票档")
                 return True
@@ -323,13 +505,13 @@ class DamaiMobileAdapter(GrabStrategy):
                 for preference in request.seat_preference:
                     seat_pos = self._find_seat_by_preference(preference)
                     if seat_pos:
-                        self._tap_screen(seat_pos[0], seat_pos[1])
+                        self._tap_screen(seat_pos[0], seat_pos[1], request)
                         time.sleep(0.5)
                         self.logger.info(f"选择座位: {preference}")
                         break
             else:
                 # 选择推荐座位
-                self._tap_screen(300, 500)  # 推荐座位位置
+                self._tap_screen(300, 500, request)  # 推荐座位位置
                 time.sleep(0.5)
                 self.logger.info("选择推荐座位")
             
@@ -345,11 +527,11 @@ class DamaiMobileAdapter(GrabStrategy):
             # 设置数量
             if request.quantity > 1:
                 for _ in range(request.quantity - 1):
-                    self._tap_screen(350, 600)  # 增加数量按钮
+                    self._tap_screen(350, 600, request)  # 增加数量按钮
                     time.sleep(0.5)
             
             # 点击立即购买
-            self._tap_screen(200, 700)  # 立即购买按钮
+            self._tap_screen(200, 700, request)  # 立即购买按钮
             time.sleep(2)
             
             self.logger.info("提交订单")
@@ -359,7 +541,7 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"提交订单异常: {e}")
             return False
     
-    async def _wait_for_payment_page(self) -> bool:
+    async def _wait_for_payment_page(self, request: TicketRequest) -> bool:
         """等待进入待支付页面"""
         try:
             self.logger.info("等待进入待支付页面...")
@@ -369,7 +551,7 @@ class DamaiMobileAdapter(GrabStrategy):
             
             # 检查是否进入待支付页面
             # 可以通过截图识别页面特征来判断
-            screenshot = self._take_screenshot()
+            screenshot = self._take_screenshot(request)
             if screenshot is None:
                 self.logger.warning("无法获取截图，假设已进入待支付页面")
                 return True
@@ -385,11 +567,11 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"等待待支付页面异常: {e}")
             return False
     
-    def _take_screenshot(self) -> Optional[np.ndarray]:
+    def _take_screenshot(self, request: Optional[TicketRequest] = None) -> Optional[np.ndarray]:
         """截图"""
         try:
             result = subprocess.run(
-                ["adb", "exec-out", "screencap -p"],
+                self._adb_prefix(request) + ["exec-out", "screencap -p"],
                 capture_output=True,
                 timeout=10
             )
@@ -407,22 +589,22 @@ class DamaiMobileAdapter(GrabStrategy):
             self.logger.error(f"截图异常: {e}")
             return None
     
-    def _tap_screen(self, x: int, y: int):
+    def _tap_screen(self, x: int, y: int, request: Optional[TicketRequest] = None):
         """点击屏幕"""
         try:
             subprocess.run(
-                ["adb", "shell", "input", "tap", str(x), str(y)],
+                self._adb_prefix(request) + ["shell", "input", "tap", str(x), str(y)],
                 capture_output=True,
                 timeout=5
             )
         except Exception as e:
             self.logger.error(f"点击屏幕异常: {e}")
     
-    def _input_text(self, text: str):
+    def _input_text(self, text: str, request: Optional[TicketRequest] = None):
         """输入文本"""
         try:
             subprocess.run(
-                ["adb", "shell", "input", "text", text],
+                self._adb_prefix(request) + ["shell", "input", "text", text],
                 capture_output=True,
                 timeout=5
             )
@@ -466,11 +648,14 @@ class DamaiMobileAdapter(GrabStrategy):
     def _detect_security_check(self, screenshot) -> bool:
         """检测安全验证"""
         try:
-            # 这里可以添加图像识别逻辑来检测安全验证
-            # 例如检测滑块验证、图片验证等
-            
-            # 临时返回False，实际应该根据图像识别结果判断
-            return False
+            # 这里可结合模板匹配/颜色区域识别滑块或验证码弹层；
+            # 先依据像素均值与方差粗判异常窗口出现（占位逻辑）。
+            if screenshot is None:
+                return False
+            mean_val = float(np.mean(screenshot))
+            std_val = float(np.std(screenshot))
+            # 假设出现验证弹窗时整体对比提升或亮度偏离明显
+            return std_val > 70 or mean_val < 30 or mean_val > 225
         except Exception as e:
             self.logger.error(f"检测安全验证异常: {e}")
             return False
